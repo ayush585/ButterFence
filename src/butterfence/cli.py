@@ -26,7 +26,6 @@ BANNER = r"""
 app = typer.Typer(
     name="butterfence",
     help="Claude Code safety harness - red-team and protect your repos.",
-    no_args_is_help=True,
 )
 pack_app = typer.Typer(help="Manage community rule packs.")
 app.add_typer(pack_app, name="pack")
@@ -39,13 +38,17 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False, "--version", "-v", help="Show version.", callback=_version_callback, is_eager=True
     ),
 ) -> None:
     """ButterFence - Claude Code safety harness."""
+    if ctx.invoked_subcommand is None and not version:
+        console.print(BANNER.format(version=__version__))
+        console.print("Run [bold]butterfence --help[/bold] for available commands.\n")
 
 
 @app.command()
@@ -134,37 +137,35 @@ def audit(
             quick=quick,
         )
 
-    table = Table(title="Audit Results", show_lines=True)
-    table.add_column("Status", style="bold", width=6)
-    table.add_column("ID", width=12)
-    table.add_column("Name", width=30)
-    table.add_column("Category", width=18)
-    table.add_column("Severity", width=10)
-    table.add_column("Decision", width=10)
+    table = Table(title="Audit Results", expand=True)
+    table.add_column("", style="bold", width=4, no_wrap=True)
+    table.add_column("ID", no_wrap=True, ratio=2)
+    table.add_column("Name", ratio=4)
+    table.add_column("Category", no_wrap=True, ratio=3)
+    table.add_column("Sev", no_wrap=True, width=8)
+    table.add_column("Result", no_wrap=True, width=7)
 
     passed = 0
     failed = 0
     for r in results:
         if r.passed:
             passed += 1
-            status = "[green]PASS[/green]"
+            status = "[green]OK[/green]"
         else:
             failed += 1
             status = "[red]FAIL[/red]"
 
-        sev_style = {
-            "critical": "red bold",
-            "high": "yellow",
-            "medium": "blue",
-            "low": "dim",
-        }.get(r.severity, "")
+        sev_colors = {"critical": "red bold", "high": "yellow", "medium": "blue", "low": "dim"}
+        sev_short = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW"}
+        sev_s = sev_short.get(r.severity, r.severity)
+        sev_c = sev_colors.get(r.severity, "")
 
         table.add_row(
             status,
             r.id,
             r.name,
             r.category,
-            f"[{sev_style}]{r.severity}[/{sev_style}]" if sev_style else r.severity,
+            f"[{sev_c}]{sev_s}[/{sev_c}]" if sev_c else sev_s,
             r.actual_decision,
         )
 
@@ -261,9 +262,13 @@ def report(
         default_ext = "xml"
     else:
         report_path = output or (project_dir / ".butterfence" / "reports" / "latest_report.md")
-        report_text = generate_report(score, audit_dicts, report_path)
-        console.print(report_text)
-        console.print(f"\n[green]Report saved to:[/green] {report_path}")
+        generate_report(score, audit_dicts, report_path)
+        score_color = "green" if score.total_score >= 90 else "yellow" if score.total_score >= 70 else "red"
+        console.print(
+            f"\n[bold]Score:[/bold] [{score_color}]{score.total_score}/{score.max_score}[/{score_color}] "
+            f"| Grade: [bold]{score.grade}[/bold] ({score.grade_label})"
+        )
+        console.print(f"[green]Report saved to:[/green] {report_path}")
         return
 
     if output:
@@ -561,6 +566,7 @@ def redteam(
             )
     except APIKeyMissingError as exc:
         console.print(f"\n[red]API Key Error:[/red] {exc}")
+        console.print("\n[dim]Setup: butterfence auth  |  Or: export ANTHROPIC_API_KEY=...[/dim]")
         raise typer.Exit(1)
     except APICallError as exc:
         console.print(f"\n[red]API Error:[/red] {exc}")
@@ -570,6 +576,7 @@ def redteam(
         raise typer.Exit(1)
     except RedTeamError as exc:
         console.print(f"\n[red]Red Team Error:[/red] {exc}")
+        console.print("\n[dim]Install: pip install anthropic  |  Or: pip install butterfence[redteam][/dim]")
         raise typer.Exit(1)
 
     # Display repo context
@@ -583,29 +590,27 @@ def redteam(
     console.print(f"  Scenarios generated: {result.scenarios_generated}")
 
     # Results table
-    table = Table(title="Red Team Results", show_lines=True)
-    table.add_column("Status", style="bold", width=8)
-    table.add_column("ID", width=16)
-    table.add_column("Name", width=30)
-    table.add_column("Category", width=18)
-    table.add_column("Severity", width=10)
-    table.add_column("Decision", width=10)
+    table = Table(title="Red Team Results", expand=True)
+    table.add_column("", style="bold", width=6, no_wrap=True)
+    table.add_column("ID", no_wrap=True, ratio=2)
+    table.add_column("Name", ratio=4)
+    table.add_column("Category", no_wrap=True, ratio=3)
+    table.add_column("Sev", no_wrap=True, width=8)
+    table.add_column("Result", no_wrap=True, width=7)
 
     for r in result.results:
         status = "[green]CAUGHT[/green]" if r.passed else "[red]MISSED[/red]"
-        sev_style = {
-            "critical": "red bold",
-            "high": "yellow",
-            "medium": "blue",
-            "low": "dim",
-        }.get(r.severity, "")
+        sev_colors = {"critical": "red bold", "high": "yellow", "medium": "blue", "low": "dim"}
+        sev_short = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW"}
+        sev_s = sev_short.get(r.severity, r.severity)
+        sev_c = sev_colors.get(r.severity, "")
 
         table.add_row(
             status,
             r.id,
             r.name,
             r.category,
-            f"[{sev_style}]{r.severity}[/{sev_style}]" if sev_style else r.severity,
+            f"[{sev_c}]{sev_s}[/{sev_c}]" if sev_c else sev_s,
             r.actual_decision,
         )
 
@@ -838,14 +843,14 @@ def auth(
         # Check env var
         env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if env_key:
-            console.print(f"  Env var: [green]set[/green] ({mask_key(env_key)})")
+            console.print(f"  Env var: [green]set[/green] [green]OK[/green] ({mask_key(env_key)})")
         else:
-            console.print("  Env var: [dim]not set[/dim]")
+            console.print("  Env var: [dim]not set[/dim] [dim]--[/dim]")
 
         # Check stored key
         stored = load_key()
         if stored:
-            console.print(f"  Stored:  [green]saved[/green] ({mask_key(stored)})")
+            console.print(f"  Stored:  [green]saved[/green] [green]OK[/green] ({mask_key(stored)})")
             console.print(f"  Path:    [cyan]{key_path}[/cyan]")
             warnings = check_key_permissions(key_path)
             if warnings:
@@ -854,7 +859,7 @@ def auth(
             else:
                 console.print("  Perms:   [green]secure[/green]")
         else:
-            console.print("  Stored:  [dim]none[/dim]")
+            console.print("  Stored:  [dim]none[/dim] [dim]--[/dim]")
 
         # Overall
         if env_key or stored:
@@ -955,20 +960,18 @@ def pack_list(
         console.print("[dim]No packs found.[/dim]")
         return
 
-    table = Table(title="Available Rule Packs")
-    table.add_column("Name", width=20)
-    table.add_column("Version", width=10)
-    table.add_column("Author", width=15)
-    table.add_column("Description", ratio=1)
-    table.add_column("Categories", width=10)
+    table = Table(title="Available Rule Packs", expand=True)
+    table.add_column("Pack", no_wrap=True, style="bold cyan", ratio=1)
+    table.add_column("Description", ratio=4)
+    table.add_column("Rules", no_wrap=True, width=5, justify="right")
 
     for p in packs:
+        desc = p.description[:70] + "..." if len(p.description) > 70 else p.description
+        cat_count = sum(len(c.get("patterns", [])) for c in p.categories.values())
         table.add_row(
             p.name,
-            p.version,
-            p.author,
-            p.description,
-            str(len(p.categories)),
+            desc,
+            str(cat_count),
         )
 
     console.print(table)
