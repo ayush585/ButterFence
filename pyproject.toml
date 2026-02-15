@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "butterfence"
-version = "0.1.0"
+version = "0.2.0"
 description = "Claude Code-native safety harness that red-teams repos against destructive/secret-leaking agent behavior"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = [
     "typer>=0.12",
     "rich>=13",
     "pyyaml>=6",
+    "pathspec>=0.11",
 ]
 
 [project.scripts]

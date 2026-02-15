@@ -1,4 +1,4 @@
-"""Typer CLI: init, audit, report, status commands."""
+"""Typer CLI: init, audit, report, status + new commands."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ app = typer.Typer(
     help="Claude Code safety harness - red-team and protect your repos.",
     no_args_is_help=True,
 )
+pack_app = typer.Typer(help="Manage community rule packs.")
+app.add_typer(pack_app, name="pack")
 console = Console()
 
 
@@ -47,12 +49,10 @@ def init(
 
     console.print(Panel("[bold]ButterFence Init[/bold]", style="blue"))
 
-    # Create .butterfence directories
     bf_dir = project_dir / ".butterfence"
     (bf_dir / "logs").mkdir(parents=True, exist_ok=True)
     (bf_dir / "reports").mkdir(parents=True, exist_ok=True)
 
-    # Write config
     config_path = bf_dir / "config.json"
     if config_path.exists() and not force:
         existing = load_json(config_path)
@@ -71,14 +71,12 @@ def init(
     save_config(config, project_dir)
     console.print(f"  Config: [cyan]{config_path}[/cyan]")
 
-    # Install hooks
     if not no_hooks:
         settings_path = install_hooks(project_dir)
         console.print(f"  Hooks: [cyan]{settings_path}[/cyan]")
     else:
         console.print("  Hooks: [yellow]skipped[/yellow]")
 
-    # Summary
     cat_count = len(config.get("categories", {}))
     pattern_count = sum(
         len(c.get("patterns", [])) for c in config.get("categories", {}).values()
@@ -124,7 +122,6 @@ def audit(
             quick=quick,
         )
 
-    # Display results table
     table = Table(title="Audit Results", show_lines=True)
     table.add_column("Status", style="bold", width=6)
     table.add_column("ID", width=12)
@@ -169,7 +166,6 @@ def audit(
         f"[red]{failed} failed[/red] / {len(results)} total"
     )
 
-    # Scoring
     audit_dicts = [
         {
             "id": r.id,
@@ -192,15 +188,16 @@ def audit(
         f"| Grade: [bold]{score.grade}[/bold] ({score.grade_label})"
     )
 
-    # Generate report if requested
     if report_flag:
         report_path = project_dir / ".butterfence" / "reports" / "latest_report.md"
-        report_text = generate_report(score, audit_dicts, report_path)
+        generate_report(score, audit_dicts, report_path)
         console.print(f"\n[green]Report saved to:[/green] {report_path}")
 
 
 @app.command()
 def report(
+    fmt: str = typer.Option("markdown", "--format", "-f", help="Output format: markdown|html|json|sarif|junit"),
+    output: Path = typer.Option(None, "--output", "-o", help="Output file path"),
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Generate a safety report from the latest audit."""
@@ -232,11 +229,40 @@ def report(
 
     score = calculate_score(audit_dicts, config)
 
-    report_path = project_dir / ".butterfence" / "reports" / "latest_report.md"
-    report_text = generate_report(score, audit_dicts, report_path)
+    if fmt == "html":
+        from butterfence.exporters.html_report import generate_html_report
+        report_text = generate_html_report(score, audit_dicts)
+        default_ext = "html"
+    elif fmt == "json":
+        import json
+        from butterfence.exporters.json_export import audit_to_json
+        report_text = json.dumps(audit_to_json(score, audit_dicts), indent=2)
+        default_ext = "json"
+    elif fmt == "sarif":
+        import json
+        from butterfence.exporters.sarif import audit_to_sarif
+        report_text = json.dumps(audit_to_sarif(audit_dicts, config), indent=2)
+        default_ext = "sarif"
+    elif fmt == "junit":
+        from butterfence.exporters.junit import audit_to_junit
+        report_text = audit_to_junit(audit_dicts)
+        default_ext = "xml"
+    else:
+        report_path = output or (project_dir / ".butterfence" / "reports" / "latest_report.md")
+        report_text = generate_report(score, audit_dicts, report_path)
+        console.print(report_text)
+        console.print(f"\n[green]Report saved to:[/green] {report_path}")
+        return
 
-    console.print(report_text)
-    console.print(f"\n[green]Report saved to:[/green] {report_path}")
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(report_text, encoding="utf-8")
+        console.print(f"[green]Report saved to:[/green] {output}")
+    else:
+        default_path = project_dir / ".butterfence" / "reports" / f"latest_report.{default_ext}"
+        default_path.parent.mkdir(parents=True, exist_ok=True)
+        default_path.write_text(report_text, encoding="utf-8")
+        console.print(f"[green]Report saved to:[/green] {default_path}")
 
 
 @app.command()
@@ -255,7 +281,6 @@ def status(
     settings_path = project_dir / ".claude" / "settings.local.json"
     log_path = bf_dir / "logs" / "events.jsonl"
 
-    # Config status
     if config_path.exists():
         config = load_config(project_dir)
         errors = validate_config(config)
@@ -270,7 +295,6 @@ def status(
     else:
         console.print("  Config: [red]not found[/red] (run `butterfence init`)")
 
-    # Hook status
     if settings_path.exists():
         settings = load_json(settings_path)
         hook_count = 0
@@ -286,16 +310,387 @@ def status(
     else:
         console.print("  Hooks: [red]no settings file[/red]")
 
-    # Log status
     if log_path.exists():
         line_count = sum(1 for _ in open(log_path, encoding="utf-8"))
         console.print(f"  Events: [cyan]{line_count} logged[/cyan]")
     else:
         console.print("  Events: [dim]none[/dim]")
 
-    # Report status
     report_path = bf_dir / "reports" / "latest_report.md"
     if report_path.exists():
         console.print(f"  Report: [cyan]{report_path}[/cyan]")
     else:
         console.print("  Report: [dim]none generated yet[/dim]")
+
+
+@app.command()
+def watch(
+    refresh: float = typer.Option(0.5, "--refresh", help="Refresh interval in seconds"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Live monitoring dashboard for ButterFence events."""
+    from butterfence.watcher import run_watcher
+
+    run_watcher(project_dir, refresh=refresh)
+
+
+@app.command()
+def scan(
+    fix: bool = typer.Option(False, "--fix", help="Show remediation suggestions"),
+    fmt: str = typer.Option("table", "--format", "-f", help="Output format: table|json|sarif"),
+    entropy_threshold: float = typer.Option(4.5, "--entropy-threshold", help="Entropy detection threshold"),
+    output: Path = typer.Option(None, "--output", "-o", help="Output file path"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Scan repository for secrets and security issues."""
+    import json
+
+    from butterfence.scanner import scan_repo
+
+    console.print(Panel("[bold]ButterFence Repo Scanner[/bold]", style="blue"))
+
+    with console.status("[bold blue]Scanning repository...[/bold blue]"):
+        result = scan_repo(project_dir, entropy_threshold=entropy_threshold, fix=fix)
+
+    console.print(
+        f"\n  Files scanned: [cyan]{result.files_scanned}[/cyan], "
+        f"skipped: [dim]{result.files_skipped}[/dim], "
+        f"findings: [{'red' if result.findings else 'green'}]{len(result.findings)}[/{'red' if result.findings else 'green'}]"
+    )
+
+    if fmt == "json":
+        data = {
+            "files_scanned": result.files_scanned,
+            "files_skipped": result.files_skipped,
+            "findings": [
+                {
+                    "file": f.file,
+                    "line": f.line,
+                    "rule": f.rule,
+                    "severity": f.severity,
+                    "matched_text": f.matched_text,
+                    "suggestion": f.suggestion,
+                }
+                for f in result.findings
+            ],
+        }
+        out = json.dumps(data, indent=2)
+        if output:
+            output.write_text(out, encoding="utf-8")
+            console.print(f"[green]Output saved to:[/green] {output}")
+        else:
+            console.print(out)
+        return
+
+    if fmt == "sarif":
+        from butterfence.exporters.sarif import audit_to_sarif
+
+        audit_dicts = [
+            {
+                "id": f"scan-{i}",
+                "name": f.rule,
+                "category": "scanner",
+                "severity": f.severity,
+                "passed": False,
+                "expected_decision": "block",
+                "actual_decision": "allow",
+                "reason": f"{f.file}:{f.line} - {f.matched_text}",
+            }
+            for i, f in enumerate(result.findings, 1)
+        ]
+        out = json.dumps(audit_to_sarif(audit_dicts), indent=2)
+        if output:
+            output.write_text(out, encoding="utf-8")
+            console.print(f"[green]Output saved to:[/green] {output}")
+        else:
+            console.print(out)
+        return
+
+    # Default: table
+    if not result.findings:
+        console.print("\n[green]No security issues found![/green]")
+        return
+
+    table = Table(title="Scan Findings", show_lines=True)
+    table.add_column("Severity", width=10)
+    table.add_column("File", width=30)
+    table.add_column("Line", width=6)
+    table.add_column("Rule", width=25)
+    table.add_column("Match", width=40)
+
+    for f in result.findings:
+        sev_style = {
+            "critical": "red bold",
+            "high": "yellow",
+            "medium": "blue",
+            "low": "dim",
+        }.get(f.severity, "")
+        table.add_row(
+            f"[{sev_style}]{f.severity}[/{sev_style}]",
+            f.file,
+            str(f.line),
+            f.rule,
+            f.matched_text[:40],
+        )
+
+    console.print(table)
+
+    if fix:
+        console.print("\n[bold]Remediation Suggestions:[/bold]")
+        seen: set[str] = set()
+        for f in result.findings:
+            if f.suggestion and f.suggestion not in seen:
+                seen.add(f.suggestion)
+                console.print(f"  - {f.suggestion}")
+
+
+@app.command()
+def ci(
+    min_score: int = typer.Option(80, "--min-score", help="Minimum passing score"),
+    fmt: str = typer.Option("json", "--format", "-f", help="Output format: json|sarif|junit"),
+    output: Path = typer.Option(None, "--output", "-o", help="Output file path"),
+    badge: Path = typer.Option(None, "--badge", help="Generate SVG badge file"),
+    generate_workflow: bool = typer.Option(False, "--generate-workflow", help="Generate GitHub Actions workflow"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Run audit in CI mode with pass/fail exit codes."""
+    from butterfence.ci import generate_github_workflow, run_ci
+
+    if generate_workflow:
+        workflow_path = project_dir / ".github" / "workflows" / "butterfence.yml"
+        workflow_path.parent.mkdir(parents=True, exist_ok=True)
+        workflow_path.write_text(generate_github_workflow(), encoding="utf-8")
+        console.print(f"[green]Workflow written to:[/green] {workflow_path}")
+        return
+
+    passed, info = run_ci(
+        project_dir=project_dir,
+        min_score=min_score,
+        output_format=fmt,
+        output_file=output,
+        badge_file=badge,
+    )
+
+    score_color = "green" if passed else "red"
+    console.print(
+        f"Score: [{score_color}]{info['score']}/{info['max_score']}[/{score_color}] "
+        f"({info['grade']}) | Min: {min_score}"
+    )
+    console.print(
+        f"Scenarios: {info['scenarios_passed']} passed, "
+        f"{info['scenarios_failed']} failed / {info['scenarios_total']} total"
+    )
+
+    if output:
+        console.print(f"Output: {output}")
+    if badge:
+        console.print(f"Badge: {badge}")
+
+    if passed:
+        console.print("[green]CI PASSED[/green]")
+    else:
+        console.print("[red]CI FAILED[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def analytics(
+    period: str = typer.Option("all", "--period", "-p", help="Time period: 1h|24h|7d|30d|all"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Show analytics from event log."""
+    from butterfence.analytics import analyze_events
+
+    console.print(Panel("[bold]ButterFence Analytics[/bold]", style="blue"))
+
+    result = analyze_events(project_dir, period=period)
+
+    if result.total_events == 0:
+        console.print("\n[dim]No events found. Run some hook events first.[/dim]")
+        return
+
+    console.print(f"\n  Total events: [cyan]{result.total_events}[/cyan]")
+    console.print(f"  [red]Blocks:[/red] {result.blocks}  [yellow]Warns:[/yellow] {result.warns}  [green]Allows:[/green] {result.allows}")
+    console.print(f"  Block rate: {result.block_rate:.1f}%")
+    console.print(f"  Threat trend: {result.threat_trend}")
+
+    if result.by_tool:
+        console.print("\n[bold]By Tool:[/bold]")
+        for tool, count in result.by_tool.most_common():
+            console.print(f"  {tool}: {count}")
+
+    if result.by_category:
+        console.print("\n[bold]By Category:[/bold]")
+        for cat, count in result.by_category.most_common():
+            bar = "\u2588" * min(count, 30)
+            console.print(f"  {cat:<20} {bar} {count}")
+
+    if result.blocked_patterns:
+        console.print("\n[bold]Most Blocked:[/bold]")
+        for pat, count in result.blocked_patterns.most_common(10):
+            console.print(f"  {pat}: {count}")
+
+
+@app.command()
+def explain(
+    scenario_id: str = typer.Argument(..., help="Scenario ID to explain (e.g. shell-001)"),
+) -> None:
+    """Show educational explanation for a threat scenario."""
+    from butterfence.explainer import get_all_scenario_ids, load_explanation
+
+    info = load_explanation(scenario_id)
+
+    if not info:
+        all_ids = get_all_scenario_ids()
+        console.print(f"[red]Scenario '{scenario_id}' not found.[/red]")
+        if all_ids:
+            console.print(f"Available: {', '.join(all_ids[:20])}")
+        raise typer.Exit(1)
+
+    expl = info.get("explanation", {})
+    sev_style = {
+        "critical": "red bold",
+        "high": "yellow",
+        "medium": "blue",
+        "low": "dim",
+    }.get(info.get("severity", ""), "")
+
+    lines = [
+        f"[bold]{info['name']}[/bold] ({info['id']})",
+        f"Category: {info['category']}",
+        f"Severity: [{sev_style}]{info['severity']}[/{sev_style}]" if sev_style else f"Severity: {info['severity']}",
+        "",
+    ]
+
+    if expl.get("what"):
+        lines.append(f"[bold]What it does:[/bold] {expl['what']}")
+    if expl.get("why_dangerous"):
+        lines.append(f"[bold]Why dangerous:[/bold] {expl['why_dangerous']}")
+    if expl.get("real_world"):
+        lines.append(f"[bold]Real-world example:[/bold] {expl['real_world']}")
+    if expl.get("safe_alternative"):
+        lines.append(f"[bold]Safe alternative:[/bold] {expl['safe_alternative']}")
+
+    if not expl:
+        lines.append("[dim]No detailed explanation available for this scenario.[/dim]")
+
+    console.print(Panel("\n".join(lines), title="Threat Explanation", border_style="yellow"))
+
+
+@app.command()
+def configure(
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Interactive configuration wizard."""
+    from butterfence.configure import run_configure
+
+    run_configure(project_dir)
+
+
+@app.command()
+def uninstall(
+    remove_data: bool = typer.Option(False, "--remove-data", help="Also remove .butterfence/ directory"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+) -> None:
+    """Remove ButterFence hooks and optionally all data."""
+    import shutil
+
+    from butterfence.installer import uninstall_hooks
+
+    console.print(Panel("[bold]ButterFence Uninstall[/bold]", style="red"))
+
+    result = uninstall_hooks(project_dir)
+    if result:
+        console.print(f"  Hooks removed from: [cyan]{result}[/cyan]")
+    else:
+        console.print("  [dim]No hooks found to remove[/dim]")
+
+    if remove_data:
+        bf_dir = project_dir / ".butterfence"
+        if bf_dir.exists():
+            shutil.rmtree(bf_dir)
+            console.print(f"  [red]Removed:[/red] {bf_dir}")
+        else:
+            console.print("  [dim]No .butterfence/ directory found[/dim]")
+
+    console.print("[green]ButterFence uninstalled.[/green]")
+
+
+# --- Pack sub-commands ---
+
+@pack_app.command("list")
+def pack_list(
+    packs_dir: Path = typer.Option(None, "--packs-dir", help="Custom packs directory"),
+) -> None:
+    """List available rule packs."""
+    from butterfence.packs import list_packs
+
+    packs = list_packs(packs_dir)
+    if not packs:
+        console.print("[dim]No packs found.[/dim]")
+        return
+
+    table = Table(title="Available Rule Packs")
+    table.add_column("Name", width=20)
+    table.add_column("Version", width=10)
+    table.add_column("Author", width=15)
+    table.add_column("Description", ratio=1)
+    table.add_column("Categories", width=10)
+
+    for p in packs:
+        table.add_row(
+            p.name,
+            p.version,
+            p.author,
+            p.description,
+            str(len(p.categories)),
+        )
+
+    console.print(table)
+
+
+@pack_app.command("install")
+def pack_install(
+    name: str = typer.Argument(..., help="Pack name to install"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
+    packs_dir: Path = typer.Option(None, "--packs-dir", help="Custom packs directory"),
+) -> None:
+    """Install a rule pack into the current config."""
+    from butterfence.packs import install_pack
+
+    success = install_pack(name, project_dir, packs_dir)
+    if success:
+        console.print(f"[green]Pack '{name}' installed successfully![/green]")
+    else:
+        console.print(f"[red]Pack '{name}' not found.[/red]")
+        raise typer.Exit(1)
+
+
+@pack_app.command("info")
+def pack_info(
+    name: str = typer.Argument(..., help="Pack name to inspect"),
+    packs_dir: Path = typer.Option(None, "--packs-dir", help="Custom packs directory"),
+) -> None:
+    """Show details for a rule pack."""
+    from butterfence.packs import get_pack_info
+
+    pack = get_pack_info(name, packs_dir)
+    if not pack:
+        console.print(f"[red]Pack '{name}' not found.[/red]")
+        raise typer.Exit(1)
+
+    lines = [
+        f"[bold]{pack.name}[/bold] v{pack.version}",
+        f"Author: {pack.author}",
+        f"Description: {pack.description}",
+        "",
+        f"[bold]Categories ({len(pack.categories)}):[/bold]",
+    ]
+    for cat_name, cat_config in pack.categories.items():
+        patterns = cat_config.get("patterns", [])
+        lines.append(
+            f"  {cat_name}: {len(patterns)} patterns | "
+            f"{cat_config.get('severity', 'high')} | {cat_config.get('action', 'block')}"
+        )
+
+    console.print(Panel("\n".join(lines), title="Pack Info", border_style="cyan"))

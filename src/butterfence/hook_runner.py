@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from butterfence.config import load_config
+from butterfence.log_rotation import rotate_if_needed
 from butterfence.matcher import HookPayload, MatchResult, match_rules
 
 
@@ -26,6 +27,9 @@ def _log_event(project_root: Path, payload: HookPayload, result: MatchResult) ->
     log_dir = project_root / ".butterfence" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "events.jsonl"
+
+    # Rotate if needed
+    rotate_if_needed(log_path)
 
     event = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -103,6 +107,41 @@ def run_hook(mode: str) -> None:
 
     # Log all events
     _log_event(project_root, payload, result)
+
+    # Chain detection (post-match, for behavioral tracking)
+    try:
+        from butterfence.chain_detector import ChainDetector
+        state_path = project_root / ".butterfence" / "chain_state.json"
+        chains_config = config.get("behavioral_chains", [])
+        detector = ChainDetector(
+            chains=chains_config if chains_config else None,
+            state_path=state_path,
+        )
+        # Extract text for chain checking
+        texts = []
+        if "command" in tool_input:
+            texts.append(tool_input["command"])
+        if "file_path" in tool_input:
+            texts.append(tool_input["file_path"])
+        for t in texts:
+            chain_matches = detector.check(t)
+            if chain_matches and result.decision == "allow":
+                # Upgrade to block if a chain completed
+                from butterfence.rules import RuleMatch
+                for cm in chain_matches:
+                    result.matches.append(
+                        RuleMatch(
+                            category="behavioral_chain",
+                            severity=cm.severity,
+                            action="block",
+                            pattern=f"chain:{cm.chain_id}",
+                            matched_text="; ".join(cm.completed_steps),
+                        )
+                    )
+                result.decision = "block"
+                result.reason = f"Behavioral chain detected: {chain_matches[0].chain_name}"
+    except Exception:
+        pass  # Chain detection is best-effort
 
     if mode == "pretool":
         output = _make_hook_output(hook_event, result)

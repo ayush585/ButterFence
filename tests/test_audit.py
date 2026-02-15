@@ -9,7 +9,7 @@ from butterfence.config import DEFAULT_CONFIG
 class TestLoadScenarios:
     def test_loads_all_scenarios(self) -> None:
         scenarios = load_scenarios()
-        assert len(scenarios) == 12
+        assert len(scenarios) == 44
 
     def test_scenario_structure(self) -> None:
         scenarios = load_scenarios()
@@ -25,9 +25,9 @@ class TestLoadScenarios:
 
 class TestRunAudit:
     def test_all_scenarios_pass(self) -> None:
-        """All 12 built-in scenarios should be blocked by default config."""
+        """All 44 built-in scenarios should pass with default config."""
         results = run_audit(DEFAULT_CONFIG)
-        assert len(results) == 12
+        assert len(results) == 44
         for r in results:
             assert r.passed, f"Scenario {r.id} ({r.name}) failed: expected {r.expected_decision}, got {r.actual_decision}"
 

@@ -26,6 +26,12 @@ class Category(str, Enum):
     SECRET_EXFIL = "secret_exfil"
     RISKY_GIT = "risky_git"
     NETWORK_EXFIL = "network_exfil"
+    PYTHON_DANGEROUS = "python_dangerous"
+    SQL_INJECTION = "sql_injection"
+    DOCKER_ESCAPE = "docker_escape"
+    CLOUD_CREDENTIALS = "cloud_credentials"
+    SUPPLY_CHAIN = "supply_chain"
+    PRIVILEGE_ESCALATION = "privilege_escalation"
 
 
 SEVERITY_WEIGHTS: dict[Severity, int] = {
