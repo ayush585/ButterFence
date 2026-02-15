@@ -5,7 +5,7 @@
 - Dark terminal, large font (18-20pt), high contrast
 - Resolution: 1920x1080 or higher
 - Record with OBS, Loom, or screen recorder
-- Set your Anthropic API key env var before recording
+- Run: butterfence auth (to save your API key securely)
 - Pre-run: butterfence init --no-hooks --dir demo/vulnerable-repo
 - Test: butterfence redteam --dir demo/vulnerable-repo --count 5 (to verify timing)
 

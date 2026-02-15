@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-268%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen.svg)]()
 
 ---
 
@@ -40,8 +40,10 @@ butterfence scan
 # Generate a full safety report
 butterfence report --format html --output report.html
 
+# Save your Anthropic API key securely (one-time)
+butterfence auth
+
 # AI Red Team: Claude Opus 4.6 attacks, ButterFence defends
-export ANTHROPIC_API_KEY='your-key'
 butterfence redteam --count 10
 
 # Start live monitoring
@@ -58,6 +60,9 @@ The `butterfence redteam` command turns Claude Opus 4.6 into an adversary. It sc
 # Install the Anthropic SDK (optional dependency)
 pip install anthropic
 
+# Save your API key securely (one-time setup)
+butterfence auth
+
 # Run AI red-team with 10 attack scenarios
 butterfence redteam --count 10
 
@@ -73,6 +78,35 @@ butterfence redteam --save --report
 - Tries obfuscation, variable indirection, base64 encoding, and creative evasion
 - Results scored identically to the built-in audit (same matcher, same scoring engine)
 - Discovers gaps in your rules that static scenarios can't find
+
+---
+
+## API Key Management
+
+ButterFence stores your Anthropic API key securely in your home directory with restricted file permissions. The key is never stored in your project repo.
+
+```bash
+# Save your key (interactive, hidden input)
+butterfence auth
+
+# Or pass directly
+butterfence auth --key sk-ant-your-key-here
+
+# Check status (shows masked key)
+butterfence auth --status
+
+# Securely remove (zero-overwrites before deletion)
+butterfence auth --remove
+```
+
+**Security:**
+- Stored at `~/.butterfence/api_key` (never in project directory)
+- File permissions: owner-only (0600 on Unix, restricted ACL on Windows)
+- Secure deletion: file content overwritten with null bytes before unlinking
+- Key validation: format checked before saving
+- Display masking: only first 7 + last 4 characters shown
+
+**Lookup order:** Environment variable > Stored key file
 
 ---
 
@@ -144,6 +178,9 @@ Beyond simple regex matching, ButterFence v2 includes:
 | `butterfence ci --format sarif --output results.sarif` | CI with SARIF output |
 | `butterfence ci --badge badge.svg` | Generate SVG score badge |
 | `butterfence ci --generate-workflow` | Generate GitHub Actions workflow |
+| `butterfence auth` | Save API key securely (interactive prompt) |
+| `butterfence auth --status` | Check API key configuration |
+| `butterfence auth --remove` | Securely delete stored key |
 | `butterfence redteam` | AI red-team with Opus 4.6 (10 scenarios) |
 | `butterfence redteam --count 20` | Generate 20 attack scenarios |
 | `butterfence redteam --categories <list>` | Focus on specific categories |
@@ -265,7 +302,7 @@ butterfence watch
 
 ```
 src/butterfence/
-    cli.py                  # Typer CLI (12 commands + pack sub-app)
+    cli.py                  # Typer CLI (13 commands + pack sub-app)
     config.py               # Config loading, validation, defaults (11 categories)
     rules.py                # Rule enums, compilation
     matcher.py              # Core matching engine (pure function)
@@ -290,6 +327,7 @@ src/butterfence/
     configure.py            # Interactive config wizard
     packs.py                # Community rule pack manager
     redteam.py              # AI red-team via Opus 4.6 API
+    auth.py                 # Secure API key management
     exporters/
         sarif.py            # SARIF 2.1.0 format
         junit.py            # JUnit XML format
@@ -308,7 +346,7 @@ The matcher is a **pure function** shared between live hooks and audit simulatio
 ## Testing
 
 ```bash
-# Run all 268 tests
+# Run all 283 tests
 pytest tests/
 
 # Run specific test file
@@ -318,7 +356,7 @@ pytest tests/test_matcher.py -v
 pytest tests/ --cov=butterfence
 ```
 
-**268 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
+**283 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
 
 ---
 

@@ -444,8 +444,9 @@ class RedTeamError(Exception):
     """Base exception for red-team operations."""
 
 
-class APIKeyMissingError(RedTeamError):
-    """Raised when the Anthropic API key is not configured."""
+# APIKeyMissingError is the canonical definition in auth.py.  Re-export
+# it here for backwards compatibility so existing imports keep working.
+from butterfence.auth import APIKeyMissingError as APIKeyMissingError  # noqa: F401
 
 
 class APICallError(RedTeamError):
@@ -460,14 +461,13 @@ DEFAULT_MODEL = "claude-opus-4-6-20250219"
 
 
 def _get_api_key() -> str:
-    """Retrieve the Anthropic API key from the environment."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not key:
-        raise APIKeyMissingError(
-            "ANTHROPIC_API_KEY environment variable is not set. "
-            "Set it with: export ANTHROPIC_API_KEY='your-key-here'"
-        )
-    return key
+    """Retrieve the Anthropic API key.
+
+    Delegates to :func:`butterfence.auth.get_api_key` which checks the
+    environment variable first, then the stored key file.
+    """
+    from butterfence.auth import get_api_key
+    return get_api_key()
 
 
 def generate_scenarios_via_api(

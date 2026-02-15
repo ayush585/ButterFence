@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -759,6 +760,105 @@ def explain(
         lines.append("[dim]No detailed explanation available for this scenario.[/dim]")
 
     console.print(Panel("\n".join(lines), title="Threat Explanation", border_style="yellow"))
+
+
+@app.command()
+def auth(
+    key: str = typer.Option(None, "--key", "-k", help="API key to save"),
+    status_flag: bool = typer.Option(False, "--status", "-s", help="Show current key status"),
+    remove: bool = typer.Option(False, "--remove", help="Remove stored key"),
+) -> None:
+    """Manage Anthropic API key for AI red-team features."""
+    from butterfence.auth import (
+        check_key_permissions,
+        get_key_path,
+        load_key,
+        mask_key,
+        remove_key,
+        save_key,
+        validate_key_format,
+    )
+
+    key_path = get_key_path()
+
+    # --- Remove ---
+    if remove:
+        removed = remove_key()
+        if removed:
+            console.print("[green]API key securely removed.[/green]")
+        else:
+            console.print("[dim]No stored key found.[/dim]")
+        return
+
+    # --- Status ---
+    if status_flag:
+        console.print(Panel("[bold]API Key Status[/bold]", style="blue"))
+
+        # Check env var
+        env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if env_key:
+            console.print(f"  Env var: [green]set[/green] ({mask_key(env_key)})")
+        else:
+            console.print("  Env var: [dim]not set[/dim]")
+
+        # Check stored key
+        stored = load_key()
+        if stored:
+            console.print(f"  Stored:  [green]saved[/green] ({mask_key(stored)})")
+            console.print(f"  Path:    [cyan]{key_path}[/cyan]")
+            warnings = check_key_permissions(key_path)
+            if warnings:
+                for w in warnings:
+                    console.print(f"  [yellow]Warning: {w}[/yellow]")
+            else:
+                console.print("  Perms:   [green]secure[/green]")
+        else:
+            console.print("  Stored:  [dim]none[/dim]")
+
+        # Overall
+        if env_key or stored:
+            console.print("\n  [green]Ready for butterfence redteam[/green]")
+        else:
+            console.print("\n  [yellow]No key configured. Run: butterfence auth[/yellow]")
+        return
+
+    # --- Save (interactive or via --key) ---
+    if key:
+        api_key = key
+    else:
+        # Interactive prompt with hidden input
+        import getpass
+
+        console.print(
+            Panel(
+                "[bold]API Key Setup[/bold]\n\n"
+                "Get your key at: [cyan]https://console.anthropic.com/settings/keys[/cyan]\n"
+                "The key will be stored securely at:\n"
+                f"  [cyan]{key_path}[/cyan]\n"
+                "with owner-only permissions.",
+                style="blue",
+            )
+        )
+        api_key = getpass.getpass("Enter your Anthropic API key: ")
+
+    if not api_key or not api_key.strip():
+        console.print("[red]No key provided.[/red]")
+        raise typer.Exit(1)
+
+    if not validate_key_format(api_key.strip()):
+        console.print("[red]Invalid key format.[/red] Keys must start with 'sk-' and be 20+ characters.")
+        raise typer.Exit(1)
+
+    try:
+        saved_path = save_key(api_key)
+        console.print(f"\n[green]API key saved securely![/green]")
+        console.print(f"  Key:  {mask_key(api_key.strip())}")
+        console.print(f"  Path: [cyan]{saved_path}[/cyan]")
+        console.print(f"  Perms: owner-only read/write")
+        console.print(f"\n  Run [bold]butterfence redteam[/bold] to start AI red-teaming.")
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
