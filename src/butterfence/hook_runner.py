@@ -24,25 +24,28 @@ def _find_project_root() -> Path:
 
 def _log_event(project_root: Path, payload: HookPayload, result: MatchResult) -> None:
     """Append event to .butterfence/logs/events.jsonl."""
-    log_dir = project_root / ".butterfence" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "events.jsonl"
+    try:
+        log_dir = project_root / ".butterfence" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "events.jsonl"
 
-    # Rotate if needed
-    rotate_if_needed(log_path)
+        # Rotate if needed
+        rotate_if_needed(log_path)
 
-    event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "hook_event": payload.hook_event,
-        "tool_name": payload.tool_name,
-        "tool_input_summary": _summarize_input(payload.tool_input),
-        "decision": result.decision,
-        "reason": result.reason,
-        "match_count": len(result.matches),
-    }
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "hook_event": payload.hook_event,
+            "tool_name": payload.tool_name,
+            "tool_input_summary": _summarize_input(payload.tool_input),
+            "decision": result.decision,
+            "reason": result.reason,
+            "match_count": len(result.matches),
+        }
 
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event) + "\n")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event) + "\n")
+    except OSError:
+        pass  # Best-effort logging, never crash the hook
 
 
 def _summarize_input(tool_input: dict) -> str:
@@ -105,8 +108,11 @@ def run_hook(mode: str) -> None:
     config = load_config(project_root)
     result = match_rules(payload, config)
 
-    # Log all events
-    _log_event(project_root, payload, result)
+    # Log all events (best-effort, never crash the hook)
+    try:
+        _log_event(project_root, payload, result)
+    except Exception:
+        print("[ButterFence] Warning: failed to write event log", file=sys.stderr)
 
     # Chain detection (post-match, for behavioral tracking)
     try:
@@ -146,7 +152,11 @@ def run_hook(mode: str) -> None:
     if mode == "pretool":
         output = _make_hook_output(hook_event, result)
         if output:
-            print(json.dumps(output))
+            try:
+                json.dump(output, sys.stdout)
+            except (TypeError, ValueError):
+                # Fallback: output a safe block decision
+                sys.stdout.write('{"hookSpecificOutput":{"decision":"block","reason":"[ButterFence] Internal error"}}')
             sys.exit(0)
     # PostToolUse: log only, no blocking
     sys.exit(0)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from datetime import datetime, timezone
 
 from butterfence import __version__
@@ -31,6 +32,10 @@ def generate_html_report(score_result: ScoreResult, audit_results: list[dict]) -
     passed = sum(1 for r in audit_results if r.get("passed", False))
     failed = len(audit_results) - passed
 
+    # Escape score fields for safe HTML insertion
+    grade_esc = html.escape(score_result.grade)
+    grade_label_esc = html.escape(score_result.grade_label)
+
     # Build scenario rows
     rows = []
     for r in audit_results:
@@ -38,10 +43,10 @@ def generate_html_report(score_result: ScoreResult, audit_results: list[dict]) -
         status = '<span style="color:#22c55e">PASS</span>' if is_passed else '<span style="color:#ef4444">FAIL</span>'
         sev_color = _severity_color(r.get("severity", "high"))
         rows.append(
-            f"<tr><td>{status}</td><td>{r.get('id','')}</td>"
-            f"<td>{r.get('name','')}</td><td>{r.get('category','')}</td>"
-            f'<td><span style="color:{sev_color}">{r.get("severity","")}</span></td>'
-            f"<td>{r.get('actual_decision','')}</td></tr>"
+            f"<tr><td>{status}</td><td>{html.escape(str(r.get('id','')))}</td>"
+            f"<td>{html.escape(str(r.get('name','')))}</td><td>{html.escape(str(r.get('category','')))}</td>"
+            f'<td><span style="color:{sev_color}">{html.escape(str(r.get("severity","")))}</span></td>'
+            f"<td>{html.escape(str(r.get('actual_decision','')))}</td></tr>"
         )
     rows_html = "\n".join(rows)
 
@@ -51,8 +56,9 @@ def generate_html_report(score_result: ScoreResult, audit_results: list[dict]) -
         total = stats["total"]
         p = stats["passed"]
         pct = (p / total * 100) if total else 0
+        cat_esc = html.escape(str(cat))
         cat_bars.append(
-            f'<div style="margin-bottom:8px"><span style="display:inline-block;width:200px">{cat}</span>'
+            f'<div style="margin-bottom:8px"><span style="display:inline-block;width:200px">{cat_esc}</span>'
             f'<div style="display:inline-block;width:200px;height:16px;background:#374151;border-radius:4px">'
             f'<div style="width:{pct}%;height:100%;background:#22c55e;border-radius:4px"></div>'
             f"</div> {p}/{total}</div>"
@@ -60,7 +66,7 @@ def generate_html_report(score_result: ScoreResult, audit_results: list[dict]) -
     cat_html = "\n".join(cat_bars)
 
     # Build recommendations
-    recs_html = "\n".join(f"<li>{rec}</li>" for rec in score_result.recommendations)
+    recs_html = "\n".join(f"<li>{html.escape(str(rec))}</li>" for rec in score_result.recommendations)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -95,9 +101,9 @@ li {{ margin-bottom: 4px; }}
 
 <div class="score-card">
   <div class="score-number" style="color:{grade_color}">{score_result.total_score}/{score_result.max_score}</div>
-  <div class="grade" style="background:{grade_color};color:#0f172a">{score_result.grade}</div>
+  <div class="grade" style="background:{grade_color};color:#0f172a">{grade_esc}</div>
   <div>
-    <div style="font-size:18px">{score_result.grade_label}</div>
+    <div style="font-size:18px">{grade_label_esc}</div>
     <div class="meta">{passed} passed, {failed} failed / {len(audit_results)} total</div>
   </div>
 </div>

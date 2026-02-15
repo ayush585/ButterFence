@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+VALID_PERIODS = {"1h", "24h", "7d", "30d", "all"}
 
 
 @dataclass
@@ -44,6 +49,11 @@ def analyze_events(
     period: str = "all",
 ) -> AnalyticsResult:
     """Parse events.jsonl and compute analytics."""
+    # Validate period
+    if period not in VALID_PERIODS:
+        logger.warning("Invalid period '%s', using 'all'. Valid: %s", period, VALID_PERIODS)
+        period = "all"
+
     log_path = project_dir / ".butterfence" / "logs" / "events.jsonl"
     result = AnalyticsResult()
 

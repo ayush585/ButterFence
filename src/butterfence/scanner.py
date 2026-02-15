@@ -110,7 +110,15 @@ def scan_repo(
     except ImportError:
         spec = None
 
-    for dirpath, dirnames, filenames in os.walk(root):
+    seen_dirs: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+        # Symlink loop detection: skip already-visited real paths
+        real_dir = os.path.realpath(dirpath)
+        if real_dir in seen_dirs:
+            dirnames.clear()  # Do not descend into loops
+            continue
+        seen_dirs.add(real_dir)
+
         # Skip directories
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
 

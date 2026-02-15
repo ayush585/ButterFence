@@ -838,9 +838,16 @@ def _build_fix_system_prompt() -> str:
 def _build_fix_user_prompt(
     missed_results: list[ScenarioResult],
     config: dict,
+    raw_scenarios: list[dict] | None = None,
 ) -> str:
     """Build the user prompt with missed scenarios and current patterns."""
     categories_config = config.get("categories", {})
+
+    # Build lookup from raw scenarios for tool/tool_input info
+    scenario_lookup: dict[str, dict] = {}
+    if raw_scenarios:
+        for s in raw_scenarios:
+            scenario_lookup[s.get("id", "")] = s
 
     # Group missed results by category
     by_category: dict[str, list[ScenarioResult]] = {}
@@ -873,13 +880,15 @@ def _build_fix_user_prompt(
         for r in results:
             parts.append(f"  Scenario: {r.name}")
             parts.append(f"  Category: {r.category}")
-            if r.match_result and r.match_result.payload:
-                payload = r.match_result.payload
-                parts.append(f"  Tool: {payload.tool_name}")
+
+            # Get tool info from raw scenario data (MatchResult has no payload attr)
+            raw = scenario_lookup.get(r.id, {})
+            if raw:
+                parts.append(f"  Tool: {raw.get('tool', 'unknown')}")
                 try:
-                    input_str = json.dumps(payload.tool_input)
+                    input_str = json.dumps(raw.get('tool_input', {}))
                 except (TypeError, ValueError):
-                    input_str = str(payload.tool_input)
+                    input_str = str(raw.get('tool_input', {}))
                 parts.append(f"  Tool input: {input_str}")
             parts.append("")
 
@@ -957,6 +966,7 @@ def generate_fix_suggestions(
     missed_results: list[ScenarioResult],
     config: dict,
     model: str = DEFAULT_MODEL,
+    raw_scenarios: list[dict] | None = None,
 ) -> list[FixSuggestion]:
     """Call Opus 4.6 to analyze missed attacks and suggest rule patches.
 
@@ -984,7 +994,7 @@ def generate_fix_suggestions(
     client = anthropic.Anthropic(api_key=api_key)
 
     system_prompt = _build_fix_system_prompt()
-    user_prompt = _build_fix_user_prompt(missed_results, config)
+    user_prompt = _build_fix_user_prompt(missed_results, config, raw_scenarios=raw_scenarios)
 
     logger.info("Calling %s for fix suggestions on %d missed scenarios.",
                 model, len(missed_results))

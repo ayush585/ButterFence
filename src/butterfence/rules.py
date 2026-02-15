@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class Severity(str, Enum):
@@ -74,12 +77,20 @@ def compile_rules(config: dict) -> list[CompiledRule]:
         for sp in cat_config.get("safe_list", []):
             try:
                 safe_compiled.append(re.compile(sp, re.IGNORECASE))
-            except re.error:
+            except re.error as exc:
+                logger.warning(
+                    "Skipping invalid safe_list regex in category '%s': %s (error: %s)",
+                    cat_name, sp, exc
+                )
                 continue
         for pattern_str in cat_config.get("patterns", []):
             try:
                 compiled = re.compile(pattern_str, re.IGNORECASE)
-            except re.error:
+            except re.error as exc:
+                logger.warning(
+                    "Skipping invalid regex in category '%s': %s (error: %s)",
+                    cat_name, pattern_str, exc
+                )
                 continue
             rules.append(
                 CompiledRule(

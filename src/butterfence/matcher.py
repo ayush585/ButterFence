@@ -11,6 +11,9 @@ from butterfence.obfuscation import detect_obfuscation
 from butterfence.rules import Action, CompiledRule, RuleMatch
 from butterfence.utils import normalize_path
 
+# ReDoS protection: truncate text longer than 100KB before regex matching
+MAX_TEXT_LENGTH = 100_000
+
 
 @dataclass
 class HookPayload:
@@ -105,6 +108,9 @@ def match_rules(payload: HookPayload, config: dict) -> MatchResult:
     if not texts:
         return MatchResult(decision="allow")
 
+    # ReDoS protection: truncate oversized text before regex matching
+    texts = [t[:MAX_TEXT_LENGTH] if len(t) > MAX_TEXT_LENGTH else t for t in texts]
+
     # Add decoded obfuscation text for matching
     obf_texts = _get_obfuscation_texts(texts)
     all_texts = texts + obf_texts
@@ -136,7 +142,10 @@ def match_rules(payload: HookPayload, config: dict) -> MatchResult:
 
     # Check entropy for Write/Edit content
     if payload.tool_name in ("Write", "Edit"):
-        threshold = config.get("entropy_threshold", 4.5)
+        try:
+            threshold = float(config.get("entropy_threshold", 4.5))
+        except (TypeError, ValueError):
+            threshold = 4.5
         entropy_matches = _get_entropy_matches(texts, threshold)
         for em in entropy_matches:
             all_matches.append(em)

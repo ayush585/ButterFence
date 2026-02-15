@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 from butterfence.matcher import HookPayload, MatchResult, match_rules
+
+logger = logging.getLogger(__name__)
 
 SCENARIOS_PATH = Path(__file__).parent.parent.parent / "assets" / "scenarios.yaml"
 
@@ -30,20 +33,30 @@ def load_scenarios(path: Path | None = None) -> list[dict]:
     scenarios_file = path or SCENARIOS_PATH
     # Also check package-relative path
     if not scenarios_file.exists():
-        # Try relative to this file
         alt = Path(__file__).parent.parent.parent / "assets" / "scenarios.yaml"
         if alt.exists():
             scenarios_file = alt
         else:
-            raise FileNotFoundError(f"Scenarios file not found: {scenarios_file}")
+            logger.warning("Scenarios file not found: %s", scenarios_file)
+            return []  # Return empty list instead of crashing
 
-    with open(scenarios_file, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data.get("scenarios", [])
+    try:
+        with open(scenarios_file, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        logger.warning("Failed to parse scenarios YAML: %s", exc)
+        return []
+
+    return data.get("scenarios", []) if isinstance(data, dict) else []
 
 
 def run_scenario(scenario: dict, config: dict) -> ScenarioResult:
     """Run a single audit scenario through the matcher."""
+    required = ("id", "name", "category", "severity")
+    for key in required:
+        if key not in scenario:
+            raise ValueError(f"Scenario missing required field: {key}")
+
     payload = HookPayload(
         hook_event="PreToolUse",
         tool_name=scenario.get("tool", "Bash"),
@@ -88,7 +101,21 @@ def run_audit(
 
     results: list[ScenarioResult] = []
     for scenario in scenarios:
-        result = run_scenario(scenario, config)
-        results.append(result)
+        try:
+            result = run_scenario(scenario, config)
+            results.append(result)
+        except Exception as exc:
+            logger.warning("Scenario %s failed: %s", scenario.get("id", "unknown"), exc)
+            results.append(ScenarioResult(
+                id=scenario.get("id", "unknown"),
+                name=scenario.get("name", "unknown"),
+                category=scenario.get("category", "unknown"),
+                severity=scenario.get("severity", "high"),
+                expected_decision=scenario.get("expected_decision", "block"),
+                actual_decision="error",
+                passed=False,
+                match_result=MatchResult(decision="error", reason=str(exc)),
+                reason=f"Scenario error: {exc}",
+            ))
 
     return results

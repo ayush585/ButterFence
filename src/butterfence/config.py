@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from butterfence.utils import deep_merge, load_json, save_json
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG: dict = {
     "version": 2,
@@ -194,10 +197,15 @@ def get_config_path(start_dir: Path | None = None) -> Path:
 def load_config(start_dir: Path | None = None) -> dict:
     """Load config from .butterfence/config.json, merged with defaults."""
     config_path = get_config_path(start_dir)
-    user_config = load_json(config_path)
-    if not user_config:
-        return DEFAULT_CONFIG.copy()
-    return deep_merge(DEFAULT_CONFIG, user_config)
+    if config_path.exists():
+        user_config = load_json(config_path)
+        if not user_config:
+            logger.warning(
+                "Config file exists but could not be loaded (corrupt?): %s "
+                "Using defaults.", config_path
+            )
+        return deep_merge(DEFAULT_CONFIG, user_config)
+    return DEFAULT_CONFIG.copy()
 
 
 def save_config(config: dict, target_dir: Path | None = None) -> Path:

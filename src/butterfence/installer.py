@@ -86,7 +86,13 @@ def install_hooks(project_dir: Path) -> Path:
         bf_hooks = bf_config["hooks"].get(event_name, [])
         existing["hooks"][event_name] = existing_hooks + bf_hooks
 
-    save_json(settings_path, existing)
+    try:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        save_json(settings_path, existing)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to install hooks: could not write {settings_path}: {exc}"
+        ) from exc
     return settings_path
 
 

@@ -1,8 +1,9 @@
-"""Behavioral attack chain detection — multi-step pattern matching."""
+"""Behavioral attack chain detection -- multi-step pattern matching."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -48,7 +49,7 @@ DEFAULT_CHAINS: list[dict] = [
     {
         "id": "exfil-creds",
         "name": "Credential exfiltration via SSH",
-        "steps": [r"(credentials|id_rsa|\.pem)", r"ssh\s+.*@"],
+        "steps": [r"(credentials|id_rsa|\\.pem)", r"ssh\s+.*@"],
         "window_seconds": 300,
         "severity": "critical",
         "description": "Accessing credentials then SSH-ing to external server",
@@ -80,21 +81,36 @@ class ChainDetector:
         # State: chain_id -> list of {step_index, timestamp, matched_text}
         self._state: dict[str, list[dict]] = {}
         if state_path and state_path.exists():
-            self._load_state()
+            try:
+                self._load_state()
+            except Exception:
+                self._state = {}
 
     def _load_state(self) -> None:
         try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self._state = data
+            raw = self.state_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                data = {}
+            # Validate each value is a list
+            self._state = {k: v for k, v in data.items() if isinstance(v, list)}
         except (json.JSONDecodeError, OSError):
             self._state = {}
 
     def _save_state(self) -> None:
-        if self.state_path:
+        if not self.state_path:
+            return
+        try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            self.state_path.write_text(
-                json.dumps(self._state, indent=2), encoding="utf-8"
-            )
+            tmp_path = self.state_path.with_suffix(f".tmp.{os.getpid()}")
+            tmp_path.write_text(json.dumps(self._state), encoding="utf-8")
+            tmp_path.replace(self.state_path)  # Atomic rename
+        except OSError:
+            # Clean up temp file on failure
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def check(self, text: str) -> list[ChainMatch]:
         """Check text against all chain definitions. Returns completed chains."""

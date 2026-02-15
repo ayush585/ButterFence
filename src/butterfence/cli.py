@@ -38,6 +38,16 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _validate_project_dir(project_dir: Path) -> None:
+    """Validate that the project directory exists and is accessible."""
+    if not project_dir.exists():
+        console.print(f"[red]Error:[/red] Directory not found: {project_dir}")
+        raise typer.Exit(1)
+    if not project_dir.is_dir():
+        console.print(f"[red]Error:[/red] Not a directory: {project_dir}")
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -58,6 +68,7 @@ def init(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Initialize ButterFence in the current project."""
+    _validate_project_dir(project_dir)
     from butterfence.config import DEFAULT_CONFIG, load_config, save_config, validate_config
     from butterfence.installer import install_hooks
     from butterfence.utils import deep_merge, load_json
@@ -120,6 +131,7 @@ def audit(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Run red-team audit scenarios against current configuration."""
+    _validate_project_dir(project_dir)
     from butterfence.audit import run_audit
     from butterfence.config import load_config
     from butterfence.report import generate_report
@@ -214,6 +226,7 @@ def report(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Generate a safety report from the latest audit."""
+    _validate_project_dir(project_dir)
     from butterfence.audit import run_audit
     from butterfence.config import load_config
     from butterfence.report import generate_report
@@ -287,6 +300,7 @@ def status(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Show current ButterFence status."""
+    _validate_project_dir(project_dir)
     from butterfence.config import load_config, validate_config
     from butterfence.installer import BUTTERFENCE_MARKER
     from butterfence.utils import load_json
@@ -346,6 +360,7 @@ def watch(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Live monitoring dashboard for ButterFence events."""
+    _validate_project_dir(project_dir)
     from butterfence.watcher import run_watcher
 
     run_watcher(project_dir, refresh=refresh)
@@ -360,6 +375,7 @@ def scan(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Scan repository for secrets and security issues."""
+    _validate_project_dir(project_dir)
     import json
 
     from butterfence.scanner import scan_repo
@@ -471,6 +487,7 @@ def ci(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Run audit in CI mode with pass/fail exit codes."""
+    _validate_project_dir(project_dir)
     from butterfence.ci import generate_github_workflow, run_ci
 
     if generate_workflow:
@@ -522,6 +539,7 @@ def redteam(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", "-d", help="Project directory"),
 ) -> None:
     """AI red-team: use Claude Opus 4.6 to generate novel attack scenarios."""
+    _validate_project_dir(project_dir)
     import json as json_mod
 
     from butterfence.config import get_config_path, load_config
@@ -657,7 +675,7 @@ def redteam(
                 "[bold yellow]Opus 4.6 is analyzing gaps and generating fixes...[/bold yellow]",
                 spinner="dots",
             ):
-                suggestions = generate_fix_suggestions(missed, config, model=model)
+                suggestions = generate_fix_suggestions(missed, config, model=model, raw_scenarios=result.raw_scenarios)
 
             if suggestions:
                 fix_table = Table(title="Suggested Fixes", show_lines=True)
@@ -730,6 +748,7 @@ def analytics(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Show analytics from event log."""
+    _validate_project_dir(project_dir)
     from butterfence.analytics import analyze_events
 
     console.print(Panel("[bold]ButterFence Analytics[/bold]", style="blue"))
@@ -912,6 +931,7 @@ def configure(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Interactive configuration wizard."""
+    _validate_project_dir(project_dir)
     from butterfence.configure import run_configure
 
     run_configure(project_dir)
@@ -923,6 +943,7 @@ def uninstall(
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),
 ) -> None:
     """Remove ButterFence hooks and optionally all data."""
+    _validate_project_dir(project_dir)
     import shutil
 
     from butterfence.installer import uninstall_hooks

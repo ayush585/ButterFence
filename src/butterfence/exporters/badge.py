@@ -11,6 +11,7 @@ def _grade_color(grade: str) -> str:
 
 def generate_badge(score: int, grade: str) -> str:
     """Generate a shields.io-style SVG badge for the safety score."""
+    score = max(0, min(100, score))  # Clamp to 0-100
     color = _grade_color(grade)
     label = "ButterFence"
     value = f"{score}/100 ({grade})"

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from butterfence.config import load_config, save_config
+
+logger = logging.getLogger(__name__)
 
 PACKS_DIR = Path(__file__).parent.parent.parent / "assets" / "packs"
 
@@ -55,6 +59,19 @@ def get_pack_info(name: str, packs_dir: Path | None = None) -> PackInfo | None:
     return None
 
 
+
+def _validate_pack_patterns(pack_categories: dict) -> list[str]:
+    """Validate all regex patterns in a pack. Returns list of errors."""
+    errors = []
+    for cat_name, cat_config in pack_categories.items():
+        for i, pattern in enumerate(cat_config.get("patterns", [])):
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                errors.append(f"{cat_name} pattern[{i}]: {exc}")
+    return errors
+
+
 def install_pack(
     name: str,
     project_dir: Path,
@@ -68,6 +85,11 @@ def install_pack(
     pack = get_pack_info(name, packs_dir)
     if not pack:
         return False
+
+    errors = _validate_pack_patterns(pack.categories)
+    if errors:
+        logger.warning("Pack '%s' has invalid patterns: %s", name, errors)
+        # Still install but skip bad patterns
 
     config = load_config(project_dir)
 

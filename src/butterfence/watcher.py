@@ -42,11 +42,15 @@ class EventTailer:
     def poll(self) -> list[dict]:
         """Return new events since last poll."""
         if not self.log_path.exists():
+            self._offset = 0  # Reset if file disappeared (rotation)
             return []
         try:
             size = self.log_path.stat().st_size
         except OSError:
             return []
+        if size < self._offset:
+            # File was rotated/truncated -- reset to beginning
+            self._offset = 0
         if size <= self._offset:
             return []
 
