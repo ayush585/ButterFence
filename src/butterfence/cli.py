@@ -512,18 +512,22 @@ def redteam(
     categories: str = typer.Option(None, "--categories", "-c", help="Comma-separated categories"),
     save: bool = typer.Option(False, "--save", "-s", help="Save results to JSON"),
     report_flag: bool = typer.Option(False, "--report", "-r", help="Generate report after"),
+    fix: bool = typer.Option(False, "--fix", "-f", help="Auto-fix gaps with AI-suggested patterns"),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed match info"),
     project_dir: Path = typer.Option(Path.cwd(), "--dir", "-d", help="Project directory"),
 ) -> None:
     """AI red-team: use Claude Opus 4.6 to generate novel attack scenarios."""
     import json as json_mod
 
-    from butterfence.config import load_config
+    from butterfence.config import get_config_path, load_config
     from butterfence.redteam import (
         APICallError,
         APIKeyMissingError,
+        FixSuggestion,
         RedTeamError,
         ScenarioParseError,
+        apply_fixes,
+        generate_fix_suggestions,
         run_redteam,
     )
     from butterfence.scoring import calculate_score
@@ -639,6 +643,43 @@ def redteam(
         f"\n[bold]Score:[/bold] [{score_color}]{score.total_score}/{score.max_score}[/{score_color}] "
         f"| Grade: [bold]{score.grade}[/bold] ({score.grade_label})"
     )
+
+    # Fix suggestions
+    missed = [r for r in result.results if not r.passed]
+    if missed and fix:
+        try:
+            with console.status(
+                "[bold yellow]Opus 4.6 is analyzing gaps and generating fixes...[/bold yellow]",
+                spinner="dots",
+            ):
+                suggestions = generate_fix_suggestions(missed, config, model=model)
+
+            if suggestions:
+                fix_table = Table(title="Suggested Fixes", show_lines=True)
+                fix_table.add_column("Category", width=20)
+                fix_table.add_column("New Patterns", ratio=1)
+                fix_table.add_column("Explanation", ratio=1)
+
+                for s in suggestions:
+                    patterns_str = chr(10).join(s.new_patterns)
+                    fix_table.add_row(s.category, patterns_str, s.explanation)
+
+                console.print(fix_table)
+
+                config_path = get_config_path(project_dir)
+                added = apply_fixes(suggestions, config, config_path)
+                console.print(
+                    f"[green]Applied {added} new pattern(s).[/green] "
+                    "Re-run [bold]butterfence redteam[/bold] to verify."
+                )
+            else:
+                console.print("[yellow]No fix suggestions could be generated.[/yellow]")
+        except (APICallError, RedTeamError) as exc:
+            console.print(f"[yellow]Fix generation failed:[/yellow] {exc}")
+    elif missed and not fix:
+        console.print(
+            "[dim]Tip: run with --fix to auto-generate patterns for missed attacks[/dim]"
+        )
 
     # Save results
     if save:

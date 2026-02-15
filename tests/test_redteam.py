@@ -583,3 +583,197 @@ class TestRedTeamResult:
             raw_scenarios=[],
         )
         assert result.catch_rate == 0.0
+
+# ---------------------------------------------------------------------------
+# H. TestFixSuggestions
+# ---------------------------------------------------------------------------
+
+class TestFixSuggestionParsing:
+    """Tests for _parse_fix_response and FixSuggestion creation."""
+
+    def test_parses_valid_fix_response(self) -> None:
+        """Valid JSON array of fix suggestions should parse correctly."""
+        from butterfence.redteam import FixSuggestion, _parse_fix_response
+
+        response = json.dumps([
+            {
+                "category": "destructive_shell",
+                "patterns": [r"rm\s+--force"],
+                "explanation": "Catches rm with --force flag",
+            },
+            {
+                "category": "risky_git",
+                "patterns": [r"git\s+branch\s+-D", r"git\s+stash\s+drop"],
+                "explanation": "Catches destructive git ops",
+            },
+        ])
+
+        suggestions = _parse_fix_response(response)
+
+        assert len(suggestions) == 2
+        assert suggestions[0].category == "destructive_shell"
+        assert len(suggestions[0].new_patterns) == 1
+        assert suggestions[1].category == "risky_git"
+        assert len(suggestions[1].new_patterns) == 2
+
+    def test_handles_markdown_fenced_response(self) -> None:
+        """Fix response wrapped in markdown fences should parse."""
+        from butterfence.redteam import _parse_fix_response
+
+        inner = json.dumps([{
+            "category": "docker_escape",
+            "patterns": [r"docker\s+run\s+.*--privileged"],
+            "explanation": "Catches privileged run",
+        }])
+        bt = chr(96) * 3
+        fenced = bt + "json\n" + inner + "\n" + bt
+
+        suggestions = _parse_fix_response(fenced)
+        assert len(suggestions) == 1
+        assert suggestions[0].category == "docker_escape"
+
+    def test_skips_invalid_regex(self) -> None:
+        """Invalid regex patterns should be filtered out."""
+        from butterfence.redteam import _parse_fix_response
+
+        response = json.dumps([{
+            "category": "destructive_shell",
+            "patterns": [r"rm\s+--force", "[invalid(regex", r"mkfs\.\w+"],
+            "explanation": "Mixed patterns",
+        }])
+
+        suggestions = _parse_fix_response(response)
+        assert len(suggestions) == 1
+        assert len(suggestions[0].new_patterns) == 2
+
+    def test_returns_empty_on_unparseable(self) -> None:
+        """Unparseable response should return empty list."""
+        from butterfence.redteam import _parse_fix_response
+        result = _parse_fix_response("not json")
+        assert result == []
+
+class TestApplyFixes:
+    """Tests for apply_fixes."""
+
+    def test_adds_patterns_to_config(self, tmp_path: Path) -> None:
+        """New patterns should be added to the config category."""
+        from butterfence.redteam import FixSuggestion, apply_fixes
+
+        config = {
+            "version": 2,
+            "categories": {
+                "risky_git": {
+                    "enabled": True,
+                    "severity": "high",
+                    "action": "block",
+                    "patterns": [r"git\s+push\s+.*--force\b"],
+                    "safe_list": [],
+                },
+            },
+        }
+
+        suggestions = [
+            FixSuggestion(
+                category="risky_git",
+                new_patterns=[r"git\s+branch\s+-D", r"git\s+stash\s+drop"],
+                explanation="Catches destructive branch/stash ops",
+            ),
+        ]
+
+        bf_dir = tmp_path / ".butterfence"
+        bf_dir.mkdir()
+        config_path = bf_dir / "config.json"
+        config_path.write_text("{}", encoding="utf-8")
+
+        added = apply_fixes(suggestions, config, config_path)
+
+        assert added == 2
+        patterns = config["categories"]["risky_git"]["patterns"]
+        assert len(patterns) == 3
+
+    def test_deduplicates_existing_patterns(self, tmp_path: Path) -> None:
+        """Patterns already in config should not be added again."""
+        from butterfence.redteam import FixSuggestion, apply_fixes
+
+        existing_pattern = r"git\s+push\s+.*--force\b"
+        config = {
+            "version": 2,
+            "categories": {
+                "risky_git": {
+                    "enabled": True,
+                    "severity": "high",
+                    "action": "block",
+                    "patterns": [existing_pattern],
+                    "safe_list": [],
+                },
+            },
+        }
+
+        suggestions = [
+            FixSuggestion(
+                category="risky_git",
+                new_patterns=[existing_pattern, r"git\s+branch\s+-D"],
+                explanation="One duplicate, one new",
+            ),
+        ]
+
+        bf_dir = tmp_path / ".butterfence"
+        bf_dir.mkdir()
+        config_path = bf_dir / "config.json"
+        config_path.write_text("{}", encoding="utf-8")
+
+        added = apply_fixes(suggestions, config, config_path)
+        assert added == 1
+        patterns = config["categories"]["risky_git"]["patterns"]
+        assert patterns.count(existing_pattern) == 1
+
+    def test_skips_invalid_regex_during_apply(self, tmp_path: Path) -> None:
+        """Invalid regex patterns should be skipped during apply."""
+        from butterfence.redteam import FixSuggestion, apply_fixes
+
+        config = {
+            "version": 2,
+            "categories": {
+                "destructive_shell": {
+                    "enabled": True,
+                    "severity": "critical",
+                    "action": "block",
+                    "patterns": [],
+                    "safe_list": [],
+                },
+            },
+        }
+
+        suggestions = [
+            FixSuggestion(
+                category="destructive_shell",
+                new_patterns=[
+                    r"valid\s+pattern",
+                    "[bad(regex",
+                    r"another\s+valid",
+                ],
+                explanation="Mix of valid and invalid",
+            ),
+        ]
+
+        bf_dir = tmp_path / ".butterfence"
+        bf_dir.mkdir()
+        config_path = bf_dir / "config.json"
+        config_path.write_text("{}", encoding="utf-8")
+
+        added = apply_fixes(suggestions, config, config_path)
+        assert added == 2
+        patterns = config["categories"]["destructive_shell"]["patterns"]
+        assert r"valid\s+pattern" in patterns
+        assert r"another\s+valid" in patterns
+        assert "[bad(regex" not in patterns
+
+
+class TestGenerateFixSuggestions:
+    """Tests for generate_fix_suggestions."""
+
+    def test_returns_empty_for_no_missed(self) -> None:
+        """Empty missed list should return empty suggestions."""
+        from butterfence.redteam import generate_fix_suggestions
+        result = generate_fix_suggestions([], {})
+        assert result == []

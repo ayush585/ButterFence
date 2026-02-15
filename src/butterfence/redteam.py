@@ -794,3 +794,304 @@ def run_redteam(
         repo_context=repo_context,
         raw_scenarios=raw_scenarios,
     )
+
+
+# ---------------------------------------------------------------------------
+# E. Fix Suggestions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FixSuggestion:
+    """A suggested fix for a category that missed attacks."""
+
+    category: str
+    new_patterns: list[str]
+    explanation: str
+
+
+def _build_fix_system_prompt() -> str:
+    """Build the system prompt for fix-suggestion generation."""
+    NL = chr(10)
+    DQ = chr(34)
+    LB = chr(91)
+    RB = chr(93)
+    LC = chr(123)
+    RC = chr(125)
+    parts = []
+    parts.append("You are a security rule engineer. You will be given attack scenarios")
+    parts.append("that bypassed a regex-based detection engine, along with the engines")
+    parts.append("current patterns for each category. Generate new regex patterns that")
+    parts.append("would catch these attacks.")
+    parts.append("")
+    parts.append("Return ONLY a JSON array:")
+    parts.append(LB + LC + DQ + "category" + DQ + ": " + DQ + "category_name" + DQ + ", " + DQ + "patterns" + DQ + ": " + LB + DQ + "regex1" + DQ + ", " + DQ + "regex2" + DQ + RB + ",")
+    parts.append(" " + DQ + "explanation" + DQ + ": " + DQ + "Why these patterns catch the attack" + DQ + RC + RB)
+    parts.append("")
+    parts.append("Rules:")
+    parts.append("1. Patterns must be valid Python regex (re module, IGNORECASE)")
+    parts.append("2. Patterns should be specific enough to avoid false positives")
+    parts.append("3. Do not duplicate existing patterns")
+    parts.append("4. Each pattern should target the specific evasion technique used")
+    return NL.join(parts)
+
+
+def _build_fix_user_prompt(
+    missed_results: list[ScenarioResult],
+    config: dict,
+) -> str:
+    """Build the user prompt with missed scenarios and current patterns."""
+    categories_config = config.get("categories", {})
+
+    # Group missed results by category
+    by_category: dict[str, list[ScenarioResult]] = {}
+    for result in missed_results:
+        by_category.setdefault(result.category, []).append(result)
+
+    parts: list[str] = [
+        "The following attack scenarios BYPASSED the detection engine.",
+        "For each, I show the scenario details and the current patterns "
+        "for that category.",
+        "",
+    ]
+
+    for cat_name, results in by_category.items():
+        parts.append(f"--- Category: {cat_name} ---")
+
+        # Show current patterns for this category
+        cat_config = categories_config.get(cat_name, {})
+        current_patterns = cat_config.get("patterns", [])
+        if current_patterns:
+            parts.append("Current patterns:")
+            for pat in current_patterns:
+                parts.append(f"  - {pat}")
+        else:
+            parts.append("Current patterns: (none)")
+
+        parts.append("")
+        parts.append("Missed scenarios:")
+
+        for r in results:
+            parts.append(f"  Scenario: {r.name}")
+            parts.append(f"  Category: {r.category}")
+            if r.match_result and r.match_result.payload:
+                payload = r.match_result.payload
+                parts.append(f"  Tool: {payload.tool_name}")
+                try:
+                    input_str = json.dumps(payload.tool_input)
+                except (TypeError, ValueError):
+                    input_str = str(payload.tool_input)
+                parts.append(f"  Tool input: {input_str}")
+            parts.append("")
+
+    parts.append(
+        "Generate NEW regex patterns (not duplicating existing ones) "
+        "that would catch these missed attacks. Return the JSON array only."
+    )
+
+    return chr(10).join(parts)
+
+
+def _parse_fix_response(raw_text: str) -> list[FixSuggestion]:
+    """Parse the API response into FixSuggestion objects.
+
+    Handles clean JSON, markdown-fenced JSON, and embedded JSON arrays.
+    Validates that all suggested patterns compile as valid regex.
+    """
+    text = raw_text.strip()
+
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+    # Attempt 1: direct JSON parse
+    data = _try_json_parse(text)
+
+    # Attempt 2: regex extraction of JSON array
+    if data is None:
+        match = re.search(r"\[[\s\S]*\]", text)
+        if match:
+            data = _try_json_parse(match.group(0))
+
+    if data is None:
+        logger.warning("Could not parse fix suggestions from API response.")
+        return []
+
+    suggestions: list[FixSuggestion] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+
+        category = entry.get("category", "")
+        raw_patterns = entry.get("patterns", [])
+        explanation = entry.get("explanation", "")
+
+        if not category or not isinstance(raw_patterns, list):
+            continue
+
+        # Validate each pattern compiles as valid regex
+        valid_patterns: list[str] = []
+        for pat in raw_patterns:
+            if not isinstance(pat, str) or not pat.strip():
+                continue
+            try:
+                re.compile(pat, re.IGNORECASE)
+                valid_patterns.append(pat)
+            except re.error as exc:
+                logger.warning(
+                    "Skipping invalid regex pattern %r: %s", pat, exc
+                )
+
+        if valid_patterns:
+            suggestions.append(FixSuggestion(
+                category=category,
+                new_patterns=valid_patterns,
+                explanation=explanation,
+            ))
+
+    return suggestions
+
+
+def generate_fix_suggestions(
+    missed_results: list[ScenarioResult],
+    config: dict,
+    model: str = DEFAULT_MODEL,
+) -> list[FixSuggestion]:
+    """Call Opus 4.6 to analyze missed attacks and suggest rule patches.
+
+    Args:
+        missed_results: ScenarioResult objects for scenarios that were NOT
+            caught by the current config.
+        config: The current ButterFence config dict.
+        model: Anthropic model to use.
+
+    Returns:
+        A list of FixSuggestion objects with validated regex patterns.
+    """
+    if not missed_results:
+        return []
+
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise RedTeamError(
+            "The 'anthropic' package is required for fix suggestions. "
+            "Install it with: pip install anthropic"
+        ) from exc
+
+    api_key = _get_api_key()
+    client = anthropic.Anthropic(api_key=api_key)
+
+    system_prompt = _build_fix_system_prompt()
+    user_prompt = _build_fix_user_prompt(missed_results, config)
+
+    logger.info("Calling %s for fix suggestions on %d missed scenarios.",
+                model, len(missed_results))
+
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except anthropic.AuthenticationError as exc:
+        raise APICallError(
+            "Authentication failed. Check your ANTHROPIC_API_KEY."
+        ) from exc
+    except anthropic.RateLimitError as exc:
+        raise APICallError(
+            "Rate limit exceeded. Wait a moment and try again."
+        ) from exc
+    except anthropic.APIConnectionError as exc:
+        raise APICallError(
+            f"Could not connect to the Anthropic API: {exc}"
+        ) from exc
+    except anthropic.APIStatusError as exc:
+        raise APICallError(
+            f"API returned status {exc.status_code}: {exc.message}"
+        ) from exc
+
+    # Extract text content from response blocks
+    raw_text = ""
+    for block in response.content:
+        if hasattr(block, "text"):
+            raw_text += block.text
+
+    if not raw_text.strip():
+        logger.warning("Fix suggestion API returned empty response.")
+        return []
+
+    logger.debug("Fix suggestion response length: %d chars", len(raw_text))
+
+    return _parse_fix_response(raw_text)
+
+
+def apply_fixes(
+    suggestions: list[FixSuggestion],
+    config: dict,
+    config_path: Path,
+) -> int:
+    """Apply fix suggestions to the config file.
+
+    For each suggestion, adds the new patterns to the config's category,
+    deduplicating against existing patterns and validating each pattern
+    compiles as valid regex.
+
+    Args:
+        suggestions: List of FixSuggestion objects to apply.
+        config: The current config dict (modified in place).
+        config_path: Path to save the updated config.
+
+    Returns:
+        Count of new patterns actually added.
+    """
+    from butterfence.config import save_config
+
+    categories = config.setdefault("categories", {})
+    total_added = 0
+
+    for suggestion in suggestions:
+        cat_name = suggestion.category
+
+        # Ensure the category exists in config
+        if cat_name not in categories:
+            logger.warning(
+                "Category %r not found in config, skipping fix.", cat_name
+            )
+            continue
+
+        cat_config = categories[cat_name]
+        existing_patterns: list[str] = cat_config.get("patterns", [])
+        existing_set = set(existing_patterns)
+
+        for pattern in suggestion.new_patterns:
+            # Skip duplicates
+            if pattern in existing_set:
+                logger.debug("Pattern already exists, skipping: %s", pattern)
+                continue
+
+            # Validate regex compiles
+            try:
+                re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                logger.warning(
+                    "Skipping invalid regex during apply: %r: %s", pattern, exc
+                )
+                continue
+
+            existing_patterns.append(pattern)
+            existing_set.add(pattern)
+            total_added += 1
+
+        cat_config["patterns"] = existing_patterns
+
+    if total_added > 0:
+        # Derive the project dir from config_path
+        # config_path is typically .butterfence/config.json
+        project_dir = config_path.parent.parent
+        save_config(config, project_dir)
+
+    return total_added
+

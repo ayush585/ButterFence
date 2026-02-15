@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-291%20passing-brightgreen.svg)]()
 
 ---
 
@@ -71,6 +71,9 @@ butterfence redteam --categories docker_escape,supply_chain
 
 # Save results and generate report
 butterfence redteam --save --report
+
+# Auto-fix: Opus 4.6 attacks, finds gaps, then patches the defense
+butterfence redteam --fix
 ```
 
 **What makes it powerful:**
@@ -78,6 +81,7 @@ butterfence redteam --save --report
 - Tries obfuscation, variable indirection, base64 encoding, and creative evasion
 - Results scored identically to the built-in audit (same matcher, same scoring engine)
 - Discovers gaps in your rules that static scenarios can't find
+- **`--fix` mode**: When attacks get through, Opus 4.6 analyzes the gaps and generates exact regex patterns to close them. Full attack-detect-patch loop.
 
 ---
 
@@ -185,6 +189,7 @@ Beyond simple regex matching, ButterFence v2 includes:
 | `butterfence redteam --count 20` | Generate 20 attack scenarios |
 | `butterfence redteam --categories <list>` | Focus on specific categories |
 | `butterfence redteam --save --report` | Save JSON results + generate report |
+| `butterfence redteam --fix` | Auto-fix gaps with AI-suggested patterns |
 | `butterfence analytics` | Event log analytics and trends |
 | `butterfence analytics --period 24h` | Filter by time period |
 | `butterfence explain <id>` | Educational threat explanation |
@@ -346,7 +351,7 @@ The matcher is a **pure function** shared between live hooks and audit simulatio
 ## Testing
 
 ```bash
-# Run all 283 tests
+# Run all 291 tests
 pytest tests/
 
 # Run specific test file
@@ -356,7 +361,7 @@ pytest tests/test_matcher.py -v
 pytest tests/ --cov=butterfence
 ```
 
-**283 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
+**291 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
 
 ---
 
