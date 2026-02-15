@@ -1,0 +1,15 @@
+/.claude
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.pytest_cache/
+.butterfence/
+*.jsonl
+.env
+.env.*
+*.pem

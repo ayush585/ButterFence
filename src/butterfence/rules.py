@@ -1,0 +1,88 @@
+"""Rule definitions, enums, and regex compilation."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class Severity(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class Action(str, Enum):
+    BLOCK = "block"
+    WARN = "warn"
+    ALLOW = "allow"
+
+
+class Category(str, Enum):
+    DESTRUCTIVE_SHELL = "destructive_shell"
+    SECRET_ACCESS = "secret_access"
+    SECRET_EXFIL = "secret_exfil"
+    RISKY_GIT = "risky_git"
+    NETWORK_EXFIL = "network_exfil"
+
+
+SEVERITY_WEIGHTS: dict[Severity, int] = {
+    Severity.CRITICAL: 15,
+    Severity.HIGH: 10,
+    Severity.MEDIUM: 5,
+    Severity.LOW: 2,
+}
+
+
+@dataclass
+class CompiledRule:
+    category: str
+    severity: Severity
+    action: Action
+    pattern: re.Pattern[str]
+    raw_pattern: str
+    safe_patterns: list[re.Pattern[str]] = field(default_factory=list)
+
+
+@dataclass
+class RuleMatch:
+    category: str
+    severity: str
+    action: str
+    pattern: str
+    matched_text: str
+
+
+def compile_rules(config: dict) -> list[CompiledRule]:
+    """Compile all enabled category patterns into CompiledRule objects."""
+    rules: list[CompiledRule] = []
+    categories = config.get("categories", {})
+    for cat_name, cat_config in categories.items():
+        if not cat_config.get("enabled", True):
+            continue
+        severity = Severity(cat_config.get("severity", "high"))
+        action = Action(cat_config.get("action", "block"))
+        safe_compiled = []
+        for sp in cat_config.get("safe_list", []):
+            try:
+                safe_compiled.append(re.compile(sp, re.IGNORECASE))
+            except re.error:
+                continue
+        for pattern_str in cat_config.get("patterns", []):
+            try:
+                compiled = re.compile(pattern_str, re.IGNORECASE)
+            except re.error:
+                continue
+            rules.append(
+                CompiledRule(
+                    category=cat_name,
+                    severity=severity,
+                    action=action,
+                    pattern=compiled,
+                    raw_pattern=pattern_str,
+                    safe_patterns=safe_compiled,
+                )
+            )
+    return rules

@@ -1,0 +1,125 @@
+"""Claude Code hook entry point. Reads stdin JSON, outputs decision JSON to stdout."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from butterfence.config import load_config
+from butterfence.matcher import HookPayload, MatchResult, match_rules
+
+
+def _find_project_root() -> Path:
+    """Walk up from cwd looking for .butterfence/ directory."""
+    cwd = Path.cwd()
+    for d in [cwd, *cwd.parents]:
+        if (d / ".butterfence").is_dir():
+            return d
+    return cwd
+
+
+def _log_event(project_root: Path, payload: HookPayload, result: MatchResult) -> None:
+    """Append event to .butterfence/logs/events.jsonl."""
+    log_dir = project_root / ".butterfence" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "events.jsonl"
+
+    event = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "hook_event": payload.hook_event,
+        "tool_name": payload.tool_name,
+        "tool_input_summary": _summarize_input(payload.tool_input),
+        "decision": result.decision,
+        "reason": result.reason,
+        "match_count": len(result.matches),
+    }
+
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(event) + "\n")
+
+
+def _summarize_input(tool_input: dict) -> str:
+    """Create a short summary of tool input for logging."""
+    if "command" in tool_input:
+        cmd = tool_input["command"]
+        return cmd[:200] if len(cmd) > 200 else cmd
+    if "file_path" in tool_input:
+        return tool_input["file_path"]
+    return str(tool_input)[:200]
+
+
+def _make_hook_output(hook_event: str, result: MatchResult) -> dict | None:
+    """Create Claude Code hook output JSON."""
+    if result.decision == "block":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": hook_event,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"[ButterFence] BLOCKED: {result.reason}",
+            }
+        }
+    elif result.decision == "warn":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": hook_event,
+                "permissionDecision": "ask",
+                "permissionDecisionReason": f"[ButterFence WARNING] {result.reason}",
+            }
+        }
+    # allow: no output, exit 0
+    return None
+
+
+def run_hook(mode: str) -> None:
+    """Main hook entry point. Mode is 'pretool' or 'posttool'."""
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.exit(0)
+        data = json.loads(raw)
+    except (json.JSONDecodeError, Exception):
+        sys.exit(1)
+
+    # Check bypass env var
+    if os.environ.get("BUTTERFENCE_BYPASS") == "1":
+        sys.exit(0)
+
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input", {})
+    hook_event = "PreToolUse" if mode == "pretool" else "PostToolUse"
+
+    payload = HookPayload(
+        hook_event=hook_event,
+        tool_name=tool_name,
+        tool_input=tool_input,
+    )
+
+    project_root = _find_project_root()
+    config = load_config(project_root)
+    result = match_rules(payload, config)
+
+    # Log all events
+    _log_event(project_root, payload, result)
+
+    if mode == "pretool":
+        output = _make_hook_output(hook_event, result)
+        if output:
+            print(json.dumps(output))
+            sys.exit(0)
+    # PostToolUse: log only, no blocking
+    sys.exit(0)
+
+
+def main() -> None:
+    """CLI entry for `python -m butterfence.hook_runner <pretool|posttool>`."""
+    if len(sys.argv) < 2 or sys.argv[1] not in ("pretool", "posttool"):
+        print("Usage: python -m butterfence.hook_runner <pretool|posttool>", file=sys.stderr)
+        sys.exit(1)
+    run_hook(sys.argv[1])
+
+
+if __name__ == "__main__":
+    main()
