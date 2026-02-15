@@ -133,6 +133,7 @@ Beyond simple regex matching, ButterFence v2 includes:
 - **Shannon Entropy Analysis** - Detects high-entropy strings in written content that may be secrets/tokens
 - **Behavioral Chain Detection** - Tracks multi-step attack patterns across events (e.g., read `.env` then `curl POST` = exfiltration)
 - **Rule Compilation Cache** - Caches compiled rules by config hash for performance
+- **False-positive safe mode (Docs-aware entropy)** - Entropy-based detection is powerful but can over-trigger on random-looking text. ButterFence automatically treats entropy-only findings as WARN when writing documentation files (.md, docs/), while still BLOCKING known credential formats (AWS/GitHub/Slack/etc.). This keeps docs workflows smooth without sacrificing secret protection.
 
 ### 11 Defense Categories
 
