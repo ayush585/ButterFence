@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from butterfence.cache import get_compiled_rules
@@ -13,6 +14,20 @@ from butterfence.utils import normalize_path
 
 # ReDoS protection: truncate text longer than 100KB before regex matching
 MAX_TEXT_LENGTH = 100_000
+
+# File extensions where entropy findings are WARN not BLOCK
+_ENTROPY_WARN_EXTENSIONS: frozenset[str] = frozenset({
+    ".md", ".markdown", ".rst", ".txt",        # docs
+    ".yaml", ".yml", ".toml", ".json", ".xml",  # config
+    ".html", ".htm", ".css",                     # web
+    ".svg", ".csv",                              # data
+})
+
+# Regex to detect output redirection targets in Bash commands
+_REDIRECT_PATTERN = re.compile(
+    r'(?:>>|>|tee\s+(?:-a\s+)?|cp\s+\S+\s+)\s*(\S+)',
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -97,6 +112,88 @@ def _is_safe_listed(text: str, rule: CompiledRule) -> bool:
     return any(sp.search(text) for sp in rule.safe_patterns)
 
 
+def _is_entropy_warn_file(payload: HookPayload) -> bool:
+    """Check if this file type should get WARN instead of BLOCK for entropy.
+
+    Doc/config/data file extensions get a downgraded action because
+    high-entropy tokens in Markdown, YAML, JSON, etc. are commonly
+    legitimate (e.g. UUIDs, hashes, base64 examples).
+    """
+    from pathlib import Path
+
+    file_path = payload.tool_input.get("file_path", "")
+    if not file_path:
+        return False
+    ext = Path(file_path).suffix.lower()
+    return ext in _ENTROPY_WARN_EXTENSIONS
+
+
+def _check_bash_redirect_to_secret(
+    command: str,
+    config: dict,
+) -> list[RuleMatch]:
+    """Check if a Bash command redirects output to a secret file path.
+
+    Detects patterns like:
+          - cat > .env << 'EOF'
+          - echo content > id_rsa
+          - tee ~/.aws/credentials
+          - printf key >> .env.production
+          - cp something .env
+    """
+    matches: list[RuleMatch] = []
+
+    # Find all redirect targets in the command
+    targets = _REDIRECT_PATTERN.findall(command)
+    if not targets:
+        return matches
+
+    # Get secret file patterns from config
+    secret_config = config.get("categories", {}).get("secret_access", {})
+    if not secret_config.get("enabled", True):
+        return matches
+
+    raw_patterns = secret_config.get("patterns", [])
+    compiled_patterns: list[re.Pattern[str]] = []
+    for pat in raw_patterns:
+        try:
+            compiled_patterns.append(re.compile(pat, re.IGNORECASE))
+        except re.error:
+            continue
+
+    # Get safe_list patterns to respect user customization
+    safe_raw = secret_config.get("safe_list", [])
+    compiled_safe: list[re.Pattern[str]] = []
+    for sp in safe_raw:
+        try:
+            compiled_safe.append(re.compile(sp, re.IGNORECASE))
+        except re.error:
+            continue
+
+    # Check each redirect target against secret patterns
+    for target in targets:
+        # Strip quotes from target
+        target_clean = target.strip("'\"")
+        target_norm = normalize_path(target_clean)
+
+        # Skip if safe-listed
+        if any(sp.search(target_norm) for sp in compiled_safe):
+            continue
+
+        for pat in compiled_patterns:
+            if pat.search(target_norm):
+                matches.append(RuleMatch(
+                    category="secret_access",
+                    severity="critical",
+                    action="block",
+                    pattern=f"bash_redirect_to_secret:{pat.pattern}",
+                    matched_text=f"redirect to {target_clean}",
+                ))
+                break  # One match per target is enough
+
+    return matches
+
+
 def match_rules(payload: HookPayload, config: dict) -> MatchResult:
     """Match a hook payload against compiled rules. Pure function.
 
@@ -140,6 +237,16 @@ def match_rules(payload: HookPayload, config: dict) -> MatchResult:
                 if _action_priority(rule.action) > _action_priority(highest_action):
                     highest_action = rule.action
 
+    # Check for Bash redirects to secret files
+    if payload.tool_name == "Bash":
+        cmd = payload.tool_input.get("command", "")
+        if cmd:
+            redirect_matches = _check_bash_redirect_to_secret(cmd, config)
+            for rm in redirect_matches:
+                all_matches.append(rm)
+                if _action_priority(Action.BLOCK) > _action_priority(highest_action):
+                    highest_action = Action.BLOCK
+
     # Check entropy for Write/Edit content
     if payload.tool_name in ("Write", "Edit"):
         try:
@@ -147,10 +254,15 @@ def match_rules(payload: HookPayload, config: dict) -> MatchResult:
         except (TypeError, ValueError):
             threshold = 4.5
         entropy_matches = _get_entropy_matches(texts, threshold)
+
+        # For doc/config files, downgrade entropy findings to WARN
+        entropy_action = Action.WARN if _is_entropy_warn_file(payload) else Action.BLOCK
+
         for em in entropy_matches:
+            em.action = entropy_action.value  # "warn" or "block"
             all_matches.append(em)
-            if _action_priority(Action.BLOCK) > _action_priority(highest_action):
-                highest_action = Action.BLOCK
+            if _action_priority(entropy_action) > _action_priority(highest_action):
+                highest_action = entropy_action
 
     if not all_matches:
         return MatchResult(decision="allow")

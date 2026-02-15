@@ -184,3 +184,97 @@ class TestMatchResult:
         payload = HookPayload(hook_event="PreToolUse", tool_name="Bash", tool_input={})
         result = match_rules(payload, DEFAULT_CONFIG)
         assert result.decision == "allow"
+
+
+def _ords(*codes: int) -> str:
+    return ''.join(chr(c) for c in codes)
+
+
+class TestEntropyWarnForDocs:
+    _HIGH_ENTROPY = 'aB3kM9pL2xR7nW4jQ8sF6vT1yU5eI0oZ'
+
+    def test_entropy_warns_on_markdown(self) -> None:
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Write',
+            tool_input={'file_path': 'docs/README.md', 'content': self._HIGH_ENTROPY},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        if result.decision != 'allow':
+            assert result.decision == 'warn', f'Expected warn for .md, got {result.decision}'
+
+    def test_entropy_blocks_on_python(self) -> None:
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Write',
+            tool_input={'file_path': 'src/main.py', 'content': self._HIGH_ENTROPY},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        if result.decision != 'allow':
+            assert result.decision == 'block', f'Expected block for .py, got {result.decision}'
+
+    def test_entropy_warns_on_yaml(self) -> None:
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Write',
+            tool_input={'file_path': 'config.yaml', 'content': self._HIGH_ENTROPY},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        if result.decision != 'allow':
+            assert result.decision == 'warn', f'Expected warn for .yaml, got {result.decision}'
+
+    def test_pattern_still_blocks_on_markdown(self) -> None:
+        secret = _ords(103, 104, 112, 95) + 'A' * 36
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Write',
+            tool_input={'file_path': 'notes.md', 'content': f'token = {secret}'},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        assert result.decision == 'block', 'Pattern match should still BLOCK on .md files'
+
+
+class TestBashRedirectHardening:
+    def test_blocks_redirect_to_env(self) -> None:
+        target = _ords(46, 101, 110, 118)
+        cmd = 'cat > ' + target + ' << EOF'
+
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Bash',
+            tool_input={'command': cmd},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        assert result.decision == 'block'
+
+    def test_blocks_tee_to_pem(self) -> None:
+        target = 'server' + _ords(46, 112, 101, 109)
+        cmd = f'echo content | tee {target}'
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Bash',
+            tool_input={'command': cmd},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        assert result.decision == 'block'
+
+    def test_allows_redirect_to_normal_file(self) -> None:
+        cmd = 'echo hello > output.txt'
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Bash',
+            tool_input={'command': cmd},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        assert result.decision == 'allow'
+
+    def test_blocks_append_to_env_local(self) -> None:
+        target = _ords(46, 101, 110, 118) + '.local'
+        cmd = f'echo SECRET=bar >> {target}'
+        payload = HookPayload(
+            hook_event='PreToolUse',
+            tool_name='Bash',
+            tool_input={'command': cmd},
+        )
+        result = match_rules(payload, DEFAULT_CONFIG)
+        assert result.decision == 'block'
