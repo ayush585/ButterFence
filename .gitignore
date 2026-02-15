@@ -13,3 +13,7 @@ build/
 .env
 .env.*
 *.pem
+_fix_*.py
+_gen_*.py
+_ords_data.txt
+demo/vulnerable-repo/report.html
