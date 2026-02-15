@@ -91,4 +91,4 @@ class TestVersion:
     def test_version_flag(self) -> None:
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "ButterFence" in result.output
+        assert "Safety Harness" in result.output

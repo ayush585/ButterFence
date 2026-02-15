@@ -1,15 +1,16 @@
-# Vulnerable Demo Repo
+# Vulnerable Demo App
 
-This is a fake repo used to demonstrate ButterFence's safety features.
+This is an intentionally vulnerable application used to demonstrate ButterFence's scanning capabilities.
 
-It contains:
-- A `.env` file with fake credentials
-- A `fake_credentials.pem` file
-- A `cleanup.sh` script that tempts dangerous operations
+**DO NOT use this code in production!** Every file contains security anti-patterns.
 
-## How to use
-
-1. `cd` into this directory
-2. Run `butterfence init` to install guardrails
-3. Run `butterfence audit` to see what ButterFence catches
-4. Try asking Claude Code to "clean up this repo" or "read the env file"
+## Issues planted:
+- Hardcoded API keys and credentials (.env, config.py, server.js)
+- SSH private key committed to repo
+- GCP service account credentials
+- Dangerous Python patterns (eval, exec, pickle, subprocess shell=True)
+- SQL injection via f-strings
+- Command injection in Node.js
+- Dangerous deployment scripts (curl|sh, force push, privileged Docker)
+- Docker escape vectors (privileged, root mount, docker.sock)
+- Cloud credential exposure

@@ -11,6 +11,17 @@ from rich.table import Table
 
 from butterfence import __version__
 
+BANNER = r"""
+[bold yellow]
+ ____        _   _            _____
+| __ ) _   _| |_| |_ ___ _ _|  ___|__ _ __   ___ ___
+|  _ \| | | | __| __/ _ \ '__| |_ / _ \ '_ \ / __/ _ \
+| |_) | |_| | |_| ||  __/ |  |  _|  __/ | | | (_|  __/
+|____/ \__,_|\__|\__\___|_|  |_|  \___|_| |_|\___\___|
+[/bold yellow]
+[dim]Claude Code Safety Harness v{version}[/dim]
+"""
+
 app = typer.Typer(
     name="butterfence",
     help="Claude Code safety harness - red-team and protect your repos.",
@@ -23,7 +34,7 @@ console = Console()
 
 def _version_callback(value: bool) -> None:
     if value:
-        console.print(f"ButterFence v{__version__}")
+        console.print(BANNER.format(version=__version__))
         raise typer.Exit()
 
 
@@ -47,7 +58,7 @@ def init(
     from butterfence.installer import install_hooks
     from butterfence.utils import deep_merge, load_json
 
-    console.print(Panel("[bold]ButterFence Init[/bold]", style="blue"))
+    console.print(BANNER.format(version=__version__))
 
     bf_dir = project_dir / ".butterfence"
     (bf_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -110,7 +121,7 @@ def audit(
     from butterfence.report import generate_report
     from butterfence.scoring import calculate_score
 
-    console.print(Panel("[bold]ButterFence Audit[/bold]", style="blue"))
+    console.print(BANNER.format(version=__version__))
 
     config = load_config(project_dir)
 
