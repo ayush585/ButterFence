@@ -380,3 +380,5 @@ MIT
 
  Fun meta-moment: ButterFence blocked 4 attempts to write its own demo script via the Write tool (entropy detector flagged the content). We had to use a Bash heredoc to bypass it. That's actually a great    
  anecdote for the demo — ButterFence is so aggressive it protects against its own creators.    
+<img width="1918" height="707" alt="butterfence" src="https://github.com/user-attachments/assets/0ffea870-c53b-430c-8a4a-21fcb46e85dc" />
+
