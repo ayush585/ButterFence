@@ -505,6 +505,179 @@ def ci(
 
 
 @app.command()
+def redteam(
+    count: int = typer.Option(10, "--count", "-n", help="Number of scenarios to generate"),
+    model: str = typer.Option("claude-opus-4-6-20250219", "--model", "-m", help="Anthropic model"),
+    categories: str = typer.Option(None, "--categories", "-c", help="Comma-separated categories"),
+    save: bool = typer.Option(False, "--save", "-s", help="Save results to JSON"),
+    report_flag: bool = typer.Option(False, "--report", "-r", help="Generate report after"),
+    verbose: bool = typer.Option(False, "--verbose", help="Show detailed match info"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", "-d", help="Project directory"),
+) -> None:
+    """AI red-team: use Claude Opus 4.6 to generate novel attack scenarios."""
+    import json as json_mod
+
+    from butterfence.config import load_config
+    from butterfence.redteam import (
+        APICallError,
+        APIKeyMissingError,
+        RedTeamError,
+        ScenarioParseError,
+        run_redteam,
+    )
+    from butterfence.scoring import calculate_score
+
+    console.print(BANNER.format(version=__version__))
+    console.print(
+        Panel(
+            "[bold red]AI Red Team Mode[/bold red]\n"
+            "Using Claude Opus 4.6 as adversary to generate novel attacks",
+            style="red",
+        )
+    )
+
+    config = load_config(project_dir)
+
+    cat_list = None
+    if categories:
+        cat_list = [c.strip() for c in categories.split(",")]
+
+    try:
+        with console.status(
+            "[bold red]Opus 4.6 is thinking like an attacker...[/bold red]",
+            spinner="dots",
+        ):
+            result = run_redteam(
+                config=config,
+                target_dir=project_dir,
+                count=count,
+                model=model,
+                categories=cat_list,
+            )
+    except APIKeyMissingError as exc:
+        console.print(f"\n[red]API Key Error:[/red] {exc}")
+        raise typer.Exit(1)
+    except APICallError as exc:
+        console.print(f"\n[red]API Error:[/red] {exc}")
+        raise typer.Exit(1)
+    except ScenarioParseError as exc:
+        console.print(f"\n[red]Parse Error:[/red] {exc}")
+        raise typer.Exit(1)
+    except RedTeamError as exc:
+        console.print(f"\n[red]Red Team Error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    # Display repo context
+    ctx = result.repo_context
+    console.print(f"\n[bold]Repo Context:[/bold]")
+    console.print(f"  Tech stack: {', '.join(ctx.tech_stack) or 'Unknown'}")
+    console.print(f"  Languages: {', '.join(ctx.languages) or 'Unknown'}")
+    console.print(f"  Files scanned: {ctx.total_files}")
+    console.print(f"  Sensitive files: {len(ctx.sensitive_files)}")
+    console.print(f"  Model: {result.model_used}")
+    console.print(f"  Scenarios generated: {result.scenarios_generated}")
+
+    # Results table
+    table = Table(title="Red Team Results", show_lines=True)
+    table.add_column("Status", style="bold", width=8)
+    table.add_column("ID", width=16)
+    table.add_column("Name", width=30)
+    table.add_column("Category", width=18)
+    table.add_column("Severity", width=10)
+    table.add_column("Decision", width=10)
+
+    for r in result.results:
+        status = "[green]CAUGHT[/green]" if r.passed else "[red]MISSED[/red]"
+        sev_style = {
+            "critical": "red bold",
+            "high": "yellow",
+            "medium": "blue",
+            "low": "dim",
+        }.get(r.severity, "")
+
+        table.add_row(
+            status,
+            r.id,
+            r.name,
+            r.category,
+            f"[{sev_style}]{r.severity}[/{sev_style}]" if sev_style else r.severity,
+            r.actual_decision,
+        )
+
+        if verbose and r.match_result.matches:
+            for m in r.match_result.matches:
+                console.print(f"    [dim]  matched: {m.pattern}[/dim]")
+
+    console.print(table)
+
+    console.print(
+        f"\n[bold]Red Team Summary:[/bold] "
+        f"[green]{result.caught} caught[/green], "
+        f"[red]{result.missed} missed[/red] / {result.scenarios_run} total "
+        f"({result.catch_rate:.0f}% catch rate)"
+    )
+
+    # Score
+    audit_dicts = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "category": r.category,
+            "severity": r.severity,
+            "passed": r.passed,
+            "expected_decision": r.expected_decision,
+            "actual_decision": r.actual_decision,
+            "reason": r.reason,
+        }
+        for r in result.results
+    ]
+
+    score = calculate_score(audit_dicts, config)
+    score_color = "green" if score.total_score >= 90 else "yellow" if score.total_score >= 70 else "red"
+    console.print(
+        f"\n[bold]Score:[/bold] [{score_color}]{score.total_score}/{score.max_score}[/{score_color}] "
+        f"| Grade: [bold]{score.grade}[/bold] ({score.grade_label})"
+    )
+
+    # Save results
+    if save:
+        save_path = project_dir / ".butterfence" / "redteam_results.json"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_data = {
+            "model": result.model_used,
+            "scenarios_generated": result.scenarios_generated,
+            "caught": result.caught,
+            "missed": result.missed,
+            "catch_rate": result.catch_rate,
+            "score": {
+                "total": score.total_score,
+                "max": score.max_score,
+                "grade": score.grade,
+                "label": score.grade_label,
+            },
+            "repo_context": {
+                "root": ctx.root,
+                "tech_stack": ctx.tech_stack,
+                "languages": ctx.languages,
+                "total_files": ctx.total_files,
+                "sensitive_files_count": len(ctx.sensitive_files),
+            },
+            "scenarios": result.raw_scenarios,
+            "results": audit_dicts,
+        }
+        save_path.write_text(json_mod.dumps(save_data, indent=2), encoding="utf-8")
+        console.print(f"\n[green]Results saved to:[/green] {save_path}")
+
+    # Generate report
+    if report_flag:
+        from butterfence.report import generate_report
+
+        report_path = project_dir / ".butterfence" / "reports" / "redteam_report.md"
+        generate_report(score, audit_dicts, report_path)
+        console.print(f"[green]Report saved to:[/green] {report_path}")
+
+
+@app.command()
 def analytics(
     period: str = typer.Option("all", "--period", "-p", help="Time period: 1h|24h|7d|30d|all"),
     project_dir: Path = typer.Option(Path.cwd(), "--dir", help="Project directory"),

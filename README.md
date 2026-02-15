@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-239%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-268%20passing-brightgreen.svg)]()
 
 ---
 
@@ -12,12 +12,13 @@
 
 1. **Init** - Installs safety hooks into Claude Code that intercept dangerous tool calls in real-time
 2. **Audit** - Runs 44 red-team scenarios covering 11 threat categories
-3. **Scan** - Proactively scans repos for secrets, dangerous files, and high-entropy strings
-4. **Report** - Generates scored safety reports in Markdown, HTML, JSON, SARIF, or JUnit
-5. **Watch** - Live terminal dashboard monitoring all hook events in real-time
-6. **CI** - CI/CD integration with pass/fail exit codes and GitHub Actions workflow generation
-7. **Explain** - Educational threat explanations for every scenario
-8. **Packs** - Community rule packs for OWASP, AWS, Docker, Node.js, Python, and more
+3. **Red Team** - Uses **Claude Opus 4.6 as an adversary** to generate novel, repo-specific attack scenarios and test them against your defenses
+4. **Scan** - Proactively scans repos for secrets, dangerous files, and high-entropy strings
+5. **Report** - Generates scored safety reports in Markdown, HTML, JSON, SARIF, or JUnit
+6. **Watch** - Live terminal dashboard monitoring all hook events in real-time
+7. **CI** - CI/CD integration with pass/fail exit codes and GitHub Actions workflow generation
+8. **Explain** - Educational threat explanations for every scenario
+9. **Packs** - Community rule packs for OWASP, AWS, Docker, Node.js, Python, and more
 
 ---
 
@@ -39,9 +40,39 @@ butterfence scan
 # Generate a full safety report
 butterfence report --format html --output report.html
 
+# AI Red Team: Claude Opus 4.6 attacks, ButterFence defends
+export ANTHROPIC_API_KEY='your-key'
+butterfence redteam --count 10
+
 # Start live monitoring
 butterfence watch
 ```
+
+---
+
+## AI Red Team (Powered by Opus 4.6)
+
+The `butterfence redteam` command turns Claude Opus 4.6 into an adversary. It scans your repo's structure, tech stack, and sensitive files, then asks the model to think like a red-team hacker and generate creative attacks targeting YOUR specific codebase. Every generated scenario is run through the same matcher as live hooks.
+
+```bash
+# Install the Anthropic SDK (optional dependency)
+pip install anthropic
+
+# Run AI red-team with 10 attack scenarios
+butterfence redteam --count 10
+
+# Focus on specific categories
+butterfence redteam --categories docker_escape,supply_chain
+
+# Save results and generate report
+butterfence redteam --save --report
+```
+
+**What makes it powerful:**
+- Opus 4.6 generates attacks **tailored to your repo** (uses your file tree, tech stack, languages)
+- Tries obfuscation, variable indirection, base64 encoding, and creative evasion
+- Results scored identically to the built-in audit (same matcher, same scoring engine)
+- Discovers gaps in your rules that static scenarios can't find
 
 ---
 
@@ -113,6 +144,10 @@ Beyond simple regex matching, ButterFence v2 includes:
 | `butterfence ci --format sarif --output results.sarif` | CI with SARIF output |
 | `butterfence ci --badge badge.svg` | Generate SVG score badge |
 | `butterfence ci --generate-workflow` | Generate GitHub Actions workflow |
+| `butterfence redteam` | AI red-team with Opus 4.6 (10 scenarios) |
+| `butterfence redteam --count 20` | Generate 20 attack scenarios |
+| `butterfence redteam --categories <list>` | Focus on specific categories |
+| `butterfence redteam --save --report` | Save JSON results + generate report |
 | `butterfence analytics` | Event log analytics and trends |
 | `butterfence analytics --period 24h` | Filter by time period |
 | `butterfence explain <id>` | Educational threat explanation |
@@ -230,7 +265,7 @@ butterfence watch
 
 ```
 src/butterfence/
-    cli.py                  # Typer CLI (11 commands + pack sub-app)
+    cli.py                  # Typer CLI (12 commands + pack sub-app)
     config.py               # Config loading, validation, defaults (11 categories)
     rules.py                # Rule enums, compilation
     matcher.py              # Core matching engine (pure function)
@@ -254,6 +289,7 @@ src/butterfence/
     explainer.py            # Educational threat explanations
     configure.py            # Interactive config wizard
     packs.py                # Community rule pack manager
+    redteam.py              # AI red-team via Opus 4.6 API
     exporters/
         sarif.py            # SARIF 2.1.0 format
         junit.py            # JUnit XML format
@@ -272,7 +308,7 @@ The matcher is a **pure function** shared between live hooks and audit simulatio
 ## Testing
 
 ```bash
-# Run all 239 tests
+# Run all 268 tests
 pytest tests/
 
 # Run specific test file
@@ -282,7 +318,7 @@ pytest tests/test_matcher.py -v
 pytest tests/ --cov=butterfence
 ```
 
-**239 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, and CLI integration.
+**268 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
 
 ---
 
@@ -294,6 +330,7 @@ pytest tests/ --cov=butterfence
 | `rich>=13` | Terminal UI, tables, panels, live dashboard |
 | `pyyaml>=6` | YAML scenario/pack loading |
 | `pathspec>=0.11` | `.gitignore` pattern matching for scanner |
+| `anthropic>=0.39` | *Optional* - Anthropic SDK for `redteam` command |
 
 ---
 
