@@ -1,13 +1,19 @@
-# ButterFence
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ayush585/ButterFence/main/assets/logo.png" alt="ButterFence Logo" width="200">
+</p>
 
-**Claude Code-native safety harness** that red-teams repos against destructive/secret-leaking agent behavior and auto-generates enforceable Claude Code hooks to prevent it.
+<h1 align="center">ButterFence</h1>
 
-[![PyPI](https://img.shields.io/pypi/v/butterfence.svg)](https://pypi.org/project/butterfence/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen.svg)]()
+<p align="center">
+  <strong>Claude Code-native safety harness</strong> that red-teams repos against destructive/secret-leaking agent behavior and auto-generates enforceable Claude Code hooks to prevent it.
+</p>
 
-<img width="1918" height="707" alt="butterfence" src="https://github.com/user-attachments/assets/0ffea870-c53b-430c-8a4a-21fcb46e85dc" />
+<p align="center">
+  <a href="https://pypi.org/project/butterfence/"><img src="https://img.shields.io/pypi/v/butterfence.svg" alt="PyPI"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/tests-315%20passing-brightgreen.svg" alt="Tests">
+</p>
 
 ---
 
