@@ -2,9 +2,10 @@
 
 **Claude Code-native safety harness** that red-teams repos against destructive/secret-leaking agent behavior and auto-generates enforceable Claude Code hooks to prevent it.
 
+[![PyPI](https://img.shields.io/pypi/v/butterfence.svg)](https://pypi.org/project/butterfence/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-299%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen.svg)]()
 
 <img width="1918" height="707" alt="butterfence" src="https://github.com/user-attachments/assets/0ffea870-c53b-430c-8a4a-21fcb46e85dc" />
 
@@ -27,8 +28,8 @@
 ## Quickstart
 
 ```bash
-# Install
-pip install -e .
+# Install from PyPI
+pip install butterfence
 
 # Initialize ButterFence in your project
 butterfence init
@@ -360,7 +361,7 @@ The matcher is a **pure function** shared between live hooks and audit simulatio
 ## Testing
 
 ```bash
-# Run all 299 tests
+# Run all 315 tests
 pytest tests/
 
 # Run specific test file
@@ -370,7 +371,7 @@ pytest tests/test_matcher.py -v
 pytest tests/ --cov=butterfence
 ```
 
-**299 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
+**315 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
 
 ---
 
