@@ -393,5 +393,5 @@ MIT
 
 ## Built With
 
-Built entirely with **Claude Code** powered by **Claude Opus 4.6** during the Cerebral Valley hackathon (Feb 10-16, 2026). ButterFence uses Opus 4.6 in three creative ways: as a red-team attacker, as a defense patcher, and as a natural language policy evaluator.
+Built with the help of **Claude Code** powered by **Claude Opus 4.6** during the Cerebral Valley hackathon (Feb 10-16, 2026). ButterFence uses Opus 4.6 in three creative ways: as a red-team attacker, as a defense patcher, and as a natural language policy evaluator.
 
