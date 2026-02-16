@@ -777,3 +777,113 @@ class TestGenerateFixSuggestions:
         from butterfence.redteam import generate_fix_suggestions
         result = generate_fix_suggestions([], {})
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# I. TestVerifyResult
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyResult:
+    """Tests for the VerifyResult dataclass."""
+
+    def _mock_ctx(self) -> RepoContext:
+        return RepoContext(
+            root="/tmp",
+            file_tree=[],
+            tech_stack=[],
+            sensitive_files=[],
+            git_branch="main",
+            has_git=True,
+            total_files=0,
+            languages=[],
+        )
+
+    def test_verify_result_fields(self) -> None:
+        """VerifyResult should store all fields correctly."""
+        from butterfence.redteam import FixSuggestion, VerifyResult
+
+        ctx = self._mock_ctx()
+        initial = RedTeamResult(
+            scenarios_generated=10,
+            scenarios_run=10,
+            caught=7,
+            missed=3,
+            results=[],
+            model_used="test",
+            repo_context=ctx,
+            raw_scenarios=[],
+        )
+        verify = RedTeamResult(
+            scenarios_generated=10,
+            scenarios_run=10,
+            caught=10,
+            missed=0,
+            results=[],
+            model_used="test",
+            repo_context=ctx,
+            raw_scenarios=[],
+        )
+        suggestions = [
+            FixSuggestion(
+                category="destructive_shell",
+                new_patterns=[r"rm\s+--force"],
+                explanation="Catches rm --force",
+            ),
+        ]
+        vr = VerifyResult(
+            initial_result=initial,
+            fix_suggestions=suggestions,
+            patterns_added=3,
+            verify_result=verify,
+            improvement=30,
+        )
+
+        assert vr.initial_result is initial
+        assert vr.verify_result is verify
+        assert vr.patterns_added == 3
+        assert vr.improvement == 30
+        assert len(vr.fix_suggestions) == 1
+        assert vr.fix_suggestions[0].category == "destructive_shell"
+        assert vr.initial_result.catch_rate == 70.0
+        assert vr.verify_result.catch_rate == 100.0
+
+    def test_verify_improvement_calculation(self) -> None:
+        """Verify improvement is verify catch_rate - initial catch_rate."""
+        from butterfence.redteam import VerifyResult
+
+        ctx = self._mock_ctx()
+        initial = RedTeamResult(
+            scenarios_generated=20,
+            scenarios_run=20,
+            caught=12,
+            missed=8,
+            results=[],
+            model_used="test",
+            repo_context=ctx,
+            raw_scenarios=[],
+        )
+        verify = RedTeamResult(
+            scenarios_generated=20,
+            scenarios_run=20,
+            caught=18,
+            missed=2,
+            results=[],
+            model_used="test",
+            repo_context=ctx,
+            raw_scenarios=[],
+        )
+        # improvement = 90% - 60% = 30 percentage points
+        improvement = int(verify.catch_rate - initial.catch_rate)
+        vr = VerifyResult(
+            initial_result=initial,
+            fix_suggestions=[],
+            patterns_added=5,
+            verify_result=verify,
+            improvement=improvement,
+        )
+
+        assert vr.improvement == 30
+        assert initial.catch_rate == 60.0
+        assert verify.catch_rate == 90.0
+        assert vr.verify_result.catch_rate - vr.initial_result.catch_rate == 30.0

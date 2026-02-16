@@ -139,8 +139,8 @@ butterfence init
 
 ## [2:40 - 3:00] THE CLOSE
 
-> "ButterFence. 12 commands. 11 defense categories. 44 built-in
-> scenarios. AI-powered red-teaming with Opus 4.6. 268 tests.
+> "ButterFence. 14 commands. 11 defense categories. 44 built-in
+> scenarios. AI-powered red-teaming with Opus 4.6. 299 tests.
 > 7 rule packs. 5 export formats. All open source."
 
 **Run:** `butterfence status`

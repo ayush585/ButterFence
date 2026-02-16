@@ -315,7 +315,7 @@ butterfence watch
 
 ```
 src/butterfence/
-    cli.py                  # Typer CLI (13 commands + pack sub-app)
+    cli.py                  # Typer CLI (14 commands + pack sub-app)
     config.py               # Config loading, validation, defaults (11 categories)
     rules.py                # Rule enums, compilation
     matcher.py              # Core matching engine (pure function)
