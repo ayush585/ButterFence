@@ -58,7 +58,12 @@ def main(
     """ButterFence - Claude Code safety harness."""
     if ctx.invoked_subcommand is None and not version:
         console.print(BANNER.format(version=__version__))
-        console.print("Run [bold]butterfence --help[/bold] for available commands.\n")
+        console.print("[bold]Quickstart:[/bold]")
+        console.print("  butterfence init          Install safety hooks")
+        console.print("  butterfence audit         Run 44 red-team scenarios")
+        console.print("  butterfence redteam       AI red-team with Opus 4.6")
+        console.print("")
+        console.print("Run [bold]butterfence --help[/bold] for all 14 commands.\n")
 
 
 @app.command()

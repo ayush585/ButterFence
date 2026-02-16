@@ -6,4 +6,4 @@ The core innovation is using **Claude Opus 4.6 as the adversary**. The butterfen
 
 Beyond AI red-teaming, ButterFence ships with 44 built-in scenarios across 11 threat categories, 7 community rule packs (OWASP, AWS, Docker), 5 export formats (including SARIF for GitHub Code Scanning), Shannon entropy detection, obfuscation decoding, behavioral chain detection, a live monitoring dashboard, and CI/CD integration.
 
-**Claude attacks. Claude defends. Claude patches.** 299 tests. 35+ modules. All open source.
+**Claude attacks. Claude defends. Claude patches.** 315 tests. 35+ modules. All open source.
