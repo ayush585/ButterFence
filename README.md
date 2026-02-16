@@ -4,7 +4,9 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-291%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-299%20passing-brightgreen.svg)]()
+
+<img width="1918" height="707" alt="butterfence" src="https://github.com/user-attachments/assets/0ffea870-c53b-430c-8a4a-21fcb46e85dc" />
 
 ---
 
@@ -81,7 +83,8 @@ butterfence redteam --fix
 - Tries obfuscation, variable indirection, base64 encoding, and creative evasion
 - Results scored identically to the built-in audit (same matcher, same scoring engine)
 - Discovers gaps in your rules that static scenarios can't find
-- **`--fix` mode**: When attacks get through, Opus 4.6 analyzes the gaps and generates exact regex patterns to close them. Full attack-detect-patch loop.
+- **`--fix` mode**: When attacks get through, Opus 4.6 analyzes the gaps and generates exact regex patterns to close them
+- **`--verify` mode**: Full closed loop in one command — attack, patch, re-attack, show improvement
 
 ---
 
@@ -191,6 +194,10 @@ Beyond simple regex matching, ButterFence v2 includes:
 | `butterfence redteam --categories <list>` | Focus on specific categories |
 | `butterfence redteam --save --report` | Save JSON results + generate report |
 | `butterfence redteam --fix` | Auto-fix gaps with AI-suggested patterns |
+| `butterfence redteam --verify` | Full loop: attack, fix, verify improvement |
+| `butterfence policy --add "..."` | Add a natural language security policy |
+| `butterfence policy --list` | List current policies |
+| `butterfence policy --check` | Evaluate policies with Opus 4.6 |
 | `butterfence analytics` | Event log analytics and trends |
 | `butterfence analytics --period 24h` | Filter by time period |
 | `butterfence explain <id>` | Educational threat explanation |
@@ -334,6 +341,7 @@ src/butterfence/
     packs.py                # Community rule pack manager
     redteam.py              # AI red-team via Opus 4.6 API
     auth.py                 # Secure API key management
+    policy.py               # Natural language policy evaluation (Opus 4.6)
     exporters/
         sarif.py            # SARIF 2.1.0 format
         junit.py            # JUnit XML format
@@ -352,7 +360,7 @@ The matcher is a **pure function** shared between live hooks and audit simulatio
 ## Testing
 
 ```bash
-# Run all 291 tests
+# Run all 299 tests
 pytest tests/
 
 # Run specific test file
@@ -362,7 +370,7 @@ pytest tests/test_matcher.py -v
 pytest tests/ --cov=butterfence
 ```
 
-**291 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
+**299 tests** covering all modules: matcher, config, rules, audit, scoring, entropy, normalizer, obfuscation, chain detection, cache, log rotation, migration, scanner, watcher, CI, analytics, explainer, packs, exporters, redteam, and CLI integration.
 
 ---
 
@@ -382,9 +390,7 @@ pytest tests/ --cov=butterfence
 
 MIT
 
-## Fun Meta-Moment
+## Built With
 
- Fun meta-moment: ButterFence blocked 4 attempts to write its own demo script via the Write tool (entropy detector flagged the content). We had to use a Bash heredoc to bypass it. That's actually a great    
- anecdote for the demo — ButterFence is so aggressive it protects against its own creators.    
-<img width="1918" height="707" alt="butterfence" src="https://github.com/user-attachments/assets/0ffea870-c53b-430c-8a4a-21fcb46e85dc" />
+Built entirely with **Claude Code** powered by **Claude Opus 4.6** during the Cerebral Valley hackathon (Feb 10-16, 2026). ButterFence uses Opus 4.6 in three creative ways: as a red-team attacker, as a defense patcher, and as a natural language policy evaluator.
 

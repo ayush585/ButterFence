@@ -14,6 +14,7 @@ DEFAULT_CONFIG: dict = {
     "entropy_threshold": 4.5,
     "behavioral_chains": [],
     "installed_packs": [],
+    "policies": [],
     "categories": {
         "destructive_shell": {
             "enabled": True,

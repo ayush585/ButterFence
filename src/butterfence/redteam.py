@@ -1105,3 +1105,147 @@ def apply_fixes(
 
     return total_added
 
+
+# ---------------------------------------------------------------------------
+# F. Verify Loop (Attack -> Fix -> Re-attack)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VerifyResult:
+    """Result of the full attack-fix-verify loop."""
+
+    initial_result: RedTeamResult
+    fix_suggestions: list[FixSuggestion]
+    patterns_added: int
+    verify_result: RedTeamResult
+    improvement: int  # catch rate difference (percentage points)
+
+
+def _rerun_scenarios_with_config(
+    raw_scenarios: list[dict],
+    config: dict,
+    model_used: str,
+    repo_context: RepoContext,
+) -> RedTeamResult:
+    """Re-run saved scenarios against an updated config (no API call).
+
+    This is a fast local-only re-evaluation: the same raw_scenarios from
+    the initial run are tested through match_rules() with the new config.
+    """
+    results: list[ScenarioResult] = []
+    caught = 0
+    missed = 0
+
+    for scenario in raw_scenarios:
+        payload = HookPayload(
+            hook_event="PreToolUse",
+            tool_name=scenario["tool"],
+            tool_input=scenario["tool_input"],
+        )
+
+        match_result = match_rules(payload, config)
+        expected = scenario["expected_decision"]  # always "block"
+        passed = match_result.decision == expected
+
+        if passed:
+            caught += 1
+        else:
+            missed += 1
+
+        result = ScenarioResult(
+            id=scenario["id"],
+            name=scenario["name"],
+            category=scenario["category"],
+            severity=scenario["severity"],
+            expected_decision=expected,
+            actual_decision=match_result.decision,
+            passed=passed,
+            match_result=match_result,
+            reason="" if passed else (
+                f"Expected {expected}, got {match_result.decision}"
+            ),
+        )
+        results.append(result)
+
+    return RedTeamResult(
+        scenarios_generated=len(raw_scenarios),
+        scenarios_run=len(raw_scenarios),
+        caught=caught,
+        missed=missed,
+        results=results,
+        model_used=model_used,
+        repo_context=repo_context,
+        raw_scenarios=raw_scenarios,
+    )
+
+
+def run_redteam_with_verify(
+    config: dict,
+    target_dir: Path,
+    config_path: Path,
+    count: int = 10,
+    model: str = DEFAULT_MODEL,
+    categories: list[str] | None = None,
+) -> VerifyResult:
+    """Full attack-fix-verify loop.
+
+    1. Run redteam (generate + test scenarios)
+    2. If any missed, generate fix suggestions
+    3. Apply fixes to config
+    4. Re-run the SAME scenarios against updated config
+    5. Return comparison
+
+    If all scenarios are caught initially, the fix and verify steps are
+    skipped and the verify_result mirrors the initial_result.
+    """
+    # Step 1: Initial red-team run
+    initial_result = run_redteam(
+        config=config,
+        target_dir=target_dir,
+        count=count,
+        model=model,
+        categories=categories,
+    )
+
+    # Step 2 & 3: Fix gaps if any scenarios were missed
+    fix_suggestions: list[FixSuggestion] = []
+    patterns_added = 0
+    missed = [r for r in initial_result.results if not r.passed]
+
+    if missed:
+        fix_suggestions = generate_fix_suggestions(
+            missed, config, model=model,
+            raw_scenarios=initial_result.raw_scenarios,
+        )
+
+        if fix_suggestions:
+            patterns_added = apply_fixes(fix_suggestions, config, config_path)
+
+    # Step 4: Re-run the SAME scenarios against updated config
+    # This is fast (no API call) -- purely local matcher evaluation
+    if patterns_added > 0:
+        # Reload config from disk to pick up saved changes
+        from butterfence.config import load_config as _reload_config
+        updated_config = _reload_config(config_path.parent.parent)
+
+        verify_result = _rerun_scenarios_with_config(
+            raw_scenarios=initial_result.raw_scenarios,
+            config=updated_config,
+            model_used=initial_result.model_used,
+            repo_context=initial_result.repo_context,
+        )
+    else:
+        # No fixes applied -- verify result is same as initial
+        verify_result = initial_result
+
+    # Calculate improvement
+    improvement = int(verify_result.catch_rate - initial_result.catch_rate)
+
+    return VerifyResult(
+        initial_result=initial_result,
+        fix_suggestions=fix_suggestions,
+        patterns_added=patterns_added,
+        verify_result=verify_result,
+        improvement=improvement,
+    )
+

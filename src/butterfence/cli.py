@@ -527,6 +527,250 @@ def ci(
         raise typer.Exit(1)
 
 
+def _run_verify_mode(
+    console: Console,
+    project_dir: Path,
+    config: dict,
+    count: int,
+    model: str,
+    cat_list: list[str] | None,
+    verbose: bool,
+    save: bool,
+    report_flag: bool,
+) -> None:
+    """Execute the full attack-fix-verify loop and display results.
+
+    Extracted as a helper so the main redteam command stays readable.
+    """
+    import json as json_mod
+
+    from butterfence.config import get_config_path, load_config
+    from butterfence.redteam import (
+        APICallError,
+        APIKeyMissingError,
+        RedTeamError,
+        ScenarioParseError,
+        run_redteam_with_verify,
+    )
+    from butterfence.scoring import calculate_score
+
+    config_path = get_config_path(project_dir)
+
+    try:
+        # Step 1: Initial attack
+        with console.status(
+            "[bold red]Opus 4.6 is thinking like an attacker...[/bold red]",
+            spinner="dots",
+        ):
+            from butterfence.redteam import run_redteam
+            initial_result = run_redteam(
+                config=config,
+                target_dir=project_dir,
+                count=count,
+                model=model,
+                categories=cat_list,
+            )
+    except APIKeyMissingError as exc:
+        console.print(f"\n[red]API Key Error:[/red] {exc}")
+        console.print("\n[dim]Setup: butterfence auth  |  Or: export ANTHROPIC_API_KEY=...[/dim]")
+        raise typer.Exit(1)
+    except APICallError as exc:
+        console.print(f"\n[red]API Error:[/red] {exc}")
+        raise typer.Exit(1)
+    except ScenarioParseError as exc:
+        console.print(f"\n[red]Parse Error:[/red] {exc}")
+        raise typer.Exit(1)
+    except RedTeamError as exc:
+        console.print(f"\n[red]Red Team Error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    # --- Panel 1: Initial Run ---
+    _show_result_table(console, initial_result, "Initial Red Team Results", verbose)
+    initial_rate = initial_result.catch_rate
+
+    console.print(
+        Panel(
+            f"[bold]{initial_result.caught}/{initial_result.scenarios_run} caught[/bold] "
+            f"({initial_rate:.0f}% catch rate)",
+            title="Initial Run",
+            border_style="red" if initial_result.missed > 0 else "green",
+        )
+    )
+
+    missed = [r for r in initial_result.results if not r.passed]
+
+    if not missed:
+        console.print(
+            Panel(
+                "[bold green]All scenarios caught on first run![/bold green]\n"
+                "No fixes needed -- your defenses are solid.",
+                title="Verification Complete",
+                border_style="green",
+            )
+        )
+        return
+
+    # --- Step 2: Generate fixes ---
+    from butterfence.redteam import (
+        apply_fixes,
+        generate_fix_suggestions,
+        _rerun_scenarios_with_config,
+    )
+
+    try:
+        with console.status(
+            "[bold yellow]Opus 4.6 is analyzing gaps and generating fixes...[/bold yellow]",
+            spinner="dots",
+        ):
+            suggestions = generate_fix_suggestions(
+                missed, config, model=model,
+                raw_scenarios=initial_result.raw_scenarios,
+            )
+    except (APICallError, RedTeamError) as exc:
+        console.print(f"[yellow]Fix generation failed:[/yellow] {exc}")
+        return
+
+    if not suggestions:
+        console.print("[yellow]No fix suggestions could be generated.[/yellow]")
+        return
+
+    # --- Panel 2: Fix Suggestions ---
+    fix_table = Table(title="AI-Suggested Fixes", show_lines=True)
+    fix_table.add_column("Category", width=20)
+    fix_table.add_column("New Patterns", ratio=1)
+    fix_table.add_column("Explanation", ratio=1)
+
+    for s in suggestions:
+        patterns_str = chr(10).join(s.new_patterns)
+        fix_table.add_row(s.category, patterns_str, s.explanation)
+
+    console.print(fix_table)
+
+    # --- Step 3: Apply fixes ---
+    patterns_added = apply_fixes(suggestions, config, config_path)
+
+    console.print(
+        Panel(
+            f"[bold green]{patterns_added} new pattern(s) added[/bold green] to config",
+            title="AI Fix Applied",
+            border_style="yellow",
+        )
+    )
+
+    if patterns_added == 0:
+        console.print("[dim]No new patterns to verify.[/dim]")
+        return
+
+    # --- Step 4: Re-run same scenarios against patched config ---
+    with console.status(
+        "[bold blue]Re-running scenarios against patched config...[/bold blue]",
+        spinner="dots",
+    ):
+        updated_config = load_config(config_path.parent.parent)
+        verify_result = _rerun_scenarios_with_config(
+            raw_scenarios=initial_result.raw_scenarios,
+            config=updated_config,
+            model_used=initial_result.model_used,
+            repo_context=initial_result.repo_context,
+        )
+
+    # --- Panel 3: Verification Results ---
+    _show_result_table(console, verify_result, "Verification Results", verbose)
+
+    verify_rate = verify_result.catch_rate
+    improvement = int(verify_rate - initial_rate)
+
+    console.print(
+        Panel(
+            f"[bold]{verify_result.caught}/{verify_result.scenarios_run} caught[/bold] "
+            f"({verify_rate:.0f}% catch rate)",
+            title="Verification Run",
+            border_style="green" if verify_result.missed == 0 else "yellow",
+        )
+    )
+
+    # --- Improvement Summary ---
+    if improvement > 0:
+        color = "green"
+        sign = "+"
+    elif improvement == 0:
+        color = "yellow"
+        sign = ""
+    else:
+        color = "red"
+        sign = ""
+
+    console.print(
+        f"\n[bold {color}]Improvement: {initial_rate:.0f}% -> {verify_rate:.0f}% "
+        f"({sign}{improvement}% improvement)[/bold {color}]"
+    )
+
+    if verify_result.missed == 0:
+        console.print("[bold green]All attacks now caught after patching![/bold green]")
+    elif verify_result.missed < initial_result.missed:
+        still_missed = verify_result.missed
+        console.print(
+            f"[yellow]{still_missed} scenario(s) still missed. "
+            f"Run --verify again to iterate.[/yellow]"
+        )
+
+    # Save results if requested
+    if save:
+        save_path = project_dir / ".butterfence" / "verify_results.json"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_data = {
+            "initial_catch_rate": initial_rate,
+            "verify_catch_rate": verify_rate,
+            "improvement": improvement,
+            "patterns_added": patterns_added,
+            "initial_caught": initial_result.caught,
+            "initial_missed": initial_result.missed,
+            "verify_caught": verify_result.caught,
+            "verify_missed": verify_result.missed,
+            "scenarios_total": initial_result.scenarios_run,
+        }
+        save_path.write_text(json_mod.dumps(save_data, indent=2), encoding="utf-8")
+        console.print(f"\n[green]Verify results saved to:[/green] {save_path}")
+
+
+def _show_result_table(
+    console: Console,
+    result: "RedTeamResult",
+    title: str,
+    verbose: bool,
+) -> None:
+    """Display a red-team results table (shared by initial and verify runs)."""
+    table = Table(title=title, expand=True)
+    table.add_column("", style="bold", width=6, no_wrap=True)
+    table.add_column("ID", no_wrap=True, ratio=2)
+    table.add_column("Name", ratio=4)
+    table.add_column("Category", no_wrap=True, ratio=3)
+    table.add_column("Sev", no_wrap=True, width=8)
+    table.add_column("Result", no_wrap=True, width=7)
+
+    for r in result.results:
+        status = "[green]CAUGHT[/green]" if r.passed else "[red]MISSED[/red]"
+        sev_colors = {"critical": "red bold", "high": "yellow", "medium": "blue", "low": "dim"}
+        sev_short = {"critical": "CRIT", "high": "HIGH", "medium": "MED", "low": "LOW"}
+        sev_s = sev_short.get(r.severity, r.severity)
+        sev_c = sev_colors.get(r.severity, "")
+
+        table.add_row(
+            status,
+            r.id,
+            r.name,
+            r.category,
+            f"[{sev_c}]{sev_s}[/{sev_c}]" if sev_c else sev_s,
+            r.actual_decision,
+        )
+
+        if verbose and r.match_result.matches:
+            for m in r.match_result.matches:
+                console.print(f"    [dim]  matched: {m.pattern}[/dim]")
+
+    console.print(table)
+
+
 @app.command()
 def redteam(
     count: int = typer.Option(10, "--count", "-n", help="Number of scenarios to generate"),
@@ -535,6 +779,7 @@ def redteam(
     save: bool = typer.Option(False, "--save", "-s", help="Save results to JSON"),
     report_flag: bool = typer.Option(False, "--report", "-r", help="Generate report after"),
     fix: bool = typer.Option(False, "--fix", "-f", help="Auto-fix gaps with AI-suggested patterns"),
+    verify: bool = typer.Option(False, "--verify", help="Full loop: attack, fix gaps, verify improvement"),
     verbose: bool = typer.Option(False, "--verbose", help="Show detailed match info"),
     project_dir: Path = typer.Option(Path.cwd(), "--dir", "-d", help="Project directory"),
 ) -> None:
@@ -549,9 +794,11 @@ def redteam(
         FixSuggestion,
         RedTeamError,
         ScenarioParseError,
+        VerifyResult,
         apply_fixes,
         generate_fix_suggestions,
         run_redteam,
+        run_redteam_with_verify,
     )
     from butterfence.scoring import calculate_score
 
@@ -569,6 +816,21 @@ def redteam(
     cat_list = None
     if categories:
         cat_list = [c.strip() for c in categories.split(",")]
+
+    # --verify implies --fix (verify includes the fix step)
+    if verify:
+        _run_verify_mode(
+            console=console,
+            project_dir=project_dir,
+            config=config,
+            count=count,
+            model=model,
+            cat_list=cat_list,
+            verbose=verbose,
+            save=save,
+            report_flag=report_flag,
+        )
+        return
 
     try:
         with console.status(
@@ -924,6 +1186,125 @@ def auth(
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
+
+
+@app.command()
+def policy(
+    check: bool = typer.Option(False, "--check", help="Evaluate policies against audit scenarios"),
+    add: str = typer.Option(None, "--add", help="Add a new policy"),
+    list_flag: bool = typer.Option(False, "--list", "-l", help="List current policies"),
+    remove: int = typer.Option(None, "--remove", help="Remove policy by index"),
+    project_dir: Path = typer.Option(Path.cwd(), "--dir", "-d", help="Project directory"),
+) -> None:
+    """Manage and evaluate natural language security policies (Opus 4.6)."""
+    _validate_project_dir(project_dir)
+    from butterfence.config import load_config, save_config
+
+    config = load_config(project_dir)
+    policies = config.get("policies", [])
+
+    # --- List ---
+    if list_flag:
+        if not policies:
+            console.print("[dim]No policies defined. Add one with: butterfence policy --add \"...\"[/dim]")
+            return
+        console.print(Panel("[bold]Security Policies[/bold]", style="blue"))
+        for i, p in enumerate(policies):
+            console.print(f"  [{i}] {p}")
+        return
+
+    # --- Add ---
+    if add:
+        policies.append(add)
+        config["policies"] = policies
+        save_config(config, project_dir)
+        console.print(f"[green]Policy added:[/green] {add}")
+        console.print(f"  Total policies: {len(policies)}")
+        return
+
+    # --- Remove ---
+    if remove is not None:
+        if 0 <= remove < len(policies):
+            removed = policies.pop(remove)
+            config["policies"] = policies
+            save_config(config, project_dir)
+            console.print(f"[yellow]Policy removed:[/yellow] {removed}")
+        else:
+            console.print(f"[red]Invalid index {remove}. Range: 0-{len(policies) - 1}[/red]")
+            raise typer.Exit(1)
+        return
+
+    # --- Check (evaluate with Opus 4.6) ---
+    if check:
+        if not policies:
+            console.print("[red]No policies to check.[/red] Add one first:")
+            console.print("  butterfence policy --add \"Never modify production files\"")
+            raise typer.Exit(1)
+
+        from butterfence.audit import load_scenarios
+        from butterfence.policy import PolicyEvalError, evaluate_policies
+
+        scenarios = load_scenarios()
+        if not scenarios:
+            console.print("[red]No scenarios loaded.[/red]")
+            raise typer.Exit(1)
+
+        console.print(Panel(
+            "[bold magenta]Policy Evaluation[/bold magenta]\n"
+            "Using Claude Opus 4.6 to evaluate natural language policies",
+            style="magenta",
+        ))
+        console.print(f"  Policies: {len(policies)}")
+        console.print(f"  Scenarios: {len(scenarios)}")
+
+        try:
+            with console.status("[bold magenta]Opus 4.6 is evaluating policies...[/bold magenta]", spinner="dots"):
+                result = evaluate_policies(policies, scenarios)
+        except PolicyEvalError as exc:
+            console.print(f"\n[red]Policy Error:[/red] {exc}")
+            raise typer.Exit(1)
+        except Exception as exc:
+            console.print(f"\n[red]Error:[/red] {exc}")
+            raise typer.Exit(1)
+
+        # Display results
+        table = Table(title="Policy Evaluation Results", expand=True)
+        table.add_column("Policy", ratio=4)
+        table.add_column("Violations", width=10, justify="right")
+        table.add_column("Status", width=12, no_wrap=True)
+
+        for pr in result.results:
+            v_count = len(pr.violations)
+            if v_count == 0:
+                status = "[green]COMPLIANT[/green]"
+            else:
+                status = f"[red]{v_count} VIOLATED[/red]"
+
+            table.add_row(pr.policy, str(v_count), status)
+
+        console.print(table)
+
+        # Show violation details
+        for pr in result.results:
+            if pr.violations:
+                console.print(f"\n[bold red]Violations for:[/bold red] {pr.policy}")
+                if pr.reasoning:
+                    console.print(f"  [dim]{pr.reasoning}[/dim]")
+                for v in pr.violations:
+                    console.print(f"  - {v.get('id', '?')}: {v.get('name', '?')} ({v.get('category', '?')})")
+
+        console.print(
+            f"\n[bold]Summary:[/bold] {result.policies_checked} policies, "
+            f"{result.total_violations} total violations"
+        )
+        return
+
+    # Default: show help
+    console.print("Usage:")
+    console.print("  butterfence policy --list              List policies")
+    console.print("  butterfence policy --add \"...\"          Add a policy")
+    console.print("  butterfence policy --remove N           Remove by index")
+    console.print("  butterfence policy --check              Evaluate with Opus 4.6")
 
 
 @app.command()
