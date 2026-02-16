@@ -779,7 +779,7 @@ def _show_result_table(
 @app.command()
 def redteam(
     count: int = typer.Option(10, "--count", "-n", help="Number of scenarios to generate"),
-    model: str = typer.Option("claude-opus-4-6-20250219", "--model", "-m", help="Anthropic model"),
+    model: str = typer.Option("claude-opus-4-6", "--model", "-m", help="Anthropic model"),
     categories: str = typer.Option(None, "--categories", "-c", help="Comma-separated categories"),
     save: bool = typer.Option(False, "--save", "-s", help="Save results to JSON"),
     report_flag: bool = typer.Option(False, "--report", "-r", help="Generate report after"),

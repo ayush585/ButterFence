@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-4-6-20250219"
+DEFAULT_MODEL = "claude-opus-4-6"
 
 
 # ---------------------------------------------------------------------------

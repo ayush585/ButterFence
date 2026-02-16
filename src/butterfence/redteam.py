@@ -457,7 +457,7 @@ class ScenarioParseError(RedTeamError):
     """Raised when scenario JSON cannot be parsed."""
 
 
-DEFAULT_MODEL = "claude-opus-4-6-20250219"
+DEFAULT_MODEL = "claude-opus-4-6"
 
 
 def _get_api_key() -> str:
