@@ -60,9 +60,6 @@ butterfence watch
 The `butterfence redteam` command turns Claude Opus 4.6 into an adversary. It scans your repo's structure, tech stack, and sensitive files, then asks the model to think like a red-team hacker and generate creative attacks targeting YOUR specific codebase. Every generated scenario is run through the same matcher as live hooks.
 
 ```bash
-# Install the Anthropic SDK (optional dependency)
-pip install anthropic
-
 # Save your API key securely (one-time setup)
 butterfence auth
 
@@ -383,7 +380,7 @@ pytest tests/ --cov=butterfence
 | `rich>=13` | Terminal UI, tables, panels, live dashboard |
 | `pyyaml>=6` | YAML scenario/pack loading |
 | `pathspec>=0.11` | `.gitignore` pattern matching for scanner |
-| `anthropic>=0.39` | *Optional* - Anthropic SDK for `redteam` command |
+| `anthropic>=0.39` | Anthropic SDK for AI red-team and policy evaluation |
 
 ---
 
